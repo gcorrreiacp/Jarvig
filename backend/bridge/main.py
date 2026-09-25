@@ -6,10 +6,10 @@ WebSocket protocol (/ws?session=<id>):
     {"type": "cancel"}                 stop the reply in progress
     {"type": "reset"}                  clear this session's history
     {"type": "ping", "t": <ms>}        latency probe
-    {"type": "incidents", "enabled": bool}   switch incident analysis on/off
+    {"type": "toggle", "service": "analysis" | "dispatcher", "enabled": bool}
   server -> client
     {"type": "hello", assistant, agent, session_id, turns}
-    {"type": "incidents", enabled, dry_run, poll_seconds, last_run, last_error, totals}
+    {"type": "service", service, enabled, dry_run, poll_seconds, last_run, last_error, totals}
     {"type": "start", id}
     {"type": "token", id, text}
     {"type": "done", id, text, first_token_ms, total_ms, turns}
@@ -32,14 +32,34 @@ from agent import Agent, AgentError, Message, build_agent
 
 from . import commands
 from .config import get_settings
-from .incidents import IncidentAnalysis
+from .services import PollingService
 from .sessions import SessionStore
 
 log = logging.getLogger("bridge")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 settings = get_settings()
 sessions = SessionStore(settings.history_limit)
-incidents = IncidentAnalysis()
+
+
+def _build_watcher():
+    from connectors.gmail_watcher import AlertWatcher, Filters
+    return AlertWatcher(Filters.load())
+
+
+def _build_dispatcher():
+    from connectors.incident_dispatcher import build_from_settings
+    return build_from_settings(settings)
+
+
+def _dispatch_errors() -> tuple[type[Exception], ...]:
+    from connectors.incident_dispatcher import DispatchError
+    return (DispatchError,)
+
+
+services = {
+    "analysis": PollingService("analysis", "Incident analysis", _build_watcher),
+    "dispatcher": PollingService("dispatcher", "Incident dispatcher", _build_dispatcher, fatal=_dispatch_errors()),
+}
 
 
 @asynccontextmanager
@@ -49,7 +69,8 @@ async def lifespan(app: FastAPI):
     app.state.agent = agent
     log.info("Agent ready: %s", agent.info())
     yield
-    await incidents.stop()
+    for service in services.values():
+        await service.stop()
     await agent.shutdown()
 
 
@@ -95,19 +116,33 @@ async def chat(req: ChatRequest):
     return {"reply": reply, "session_id": req.session_id}
 
 
-class IncidentToggle(BaseModel):
+class ServiceToggle(BaseModel):
     enabled: bool
 
 
+async def _toggle(key: str, enabled: bool) -> str:
+    service = services[key]
+    return await (commands.enable(service) if enabled else commands.disable(service))
+
+
 @app.get("/api/incidents")
-async def incidents_status():
-    return incidents.status()
+async def analysis_status():
+    return services["analysis"].status()
 
 
 @app.post("/api/incidents")
-async def incidents_toggle(req: IncidentToggle):
-    reply = await (commands.enable(incidents) if req.enabled else commands.disable(incidents))
-    return {"reply": reply, **incidents.status()}
+async def analysis_toggle(req: ServiceToggle):
+    return {"reply": await _toggle("analysis", req.enabled), **services["analysis"].status()}
+
+
+@app.get("/api/dispatcher")
+async def dispatcher_status():
+    return services["dispatcher"].status()
+
+
+@app.post("/api/dispatcher")
+async def dispatcher_toggle(req: ServiceToggle):
+    return {"reply": await _toggle("dispatcher", req.enabled), **services["dispatcher"].status()}
 
 
 @app.post("/api/sessions/{session_id}/reset")
@@ -130,14 +165,13 @@ async def say(ws: WebSocket, session_id: str, text: str) -> None:
     await safe_send(ws, {"type": "done", "id": turn_id, "text": text, "turns": sessions.turns(session_id), "local": True})
 
 
-async def toggle_incidents(ws: WebSocket, session_id: str, enabled: bool) -> None:
-    """The HUD's on/off button."""
-    reply = await (commands.enable(incidents) if enabled else commands.disable(incidents))
-    await say(ws, session_id, reply)
+async def toggle_service(ws: WebSocket, session_id: str, key: str, enabled: bool) -> None:
+    """The HUD's on/off buttons."""
+    await say(ws, session_id, await _toggle(key, enabled))
 
 
 async def run_turn(ws: WebSocket, session_id: str, text: str, offer_pending: bool = False) -> None:
-    reply = await commands.handle(text, incidents, offer_pending)
+    reply = await commands.handle(text, services, offer_pending)
     if reply is not None:
         sessions.append(session_id, Message("user", text))
         sessions.append(session_id, Message("assistant", reply))
@@ -196,13 +230,17 @@ async def ws_endpoint(ws: WebSocket):
         "session_id": session_id,
         "turns": sessions.turns(session_id),
     })
-    unsubscribe = incidents.subscribe(lambda status: ws.send_json({"type": "incidents", **status}))
-    await ws.send_json({"type": "incidents", **incidents.status()})
+    unsubscribers = [
+        service.subscribe(lambda status: ws.send_json({"type": "service", **status}))
+        for service in services.values()
+    ]
+    for service in services.values():
+        await ws.send_json({"type": "service", **service.status()})
 
     # Greet a new conversation. Not stored in history: agents expect it to start with the user.
     offer_pending = False
     if sessions.turns(session_id) == 0:
-        text, offer_pending = commands.greeting(settings.assistant_name, incidents)
+        text, offer_pending = commands.greeting(settings.assistant_name, services["analysis"])
         await say(ws, session_id, text)
 
     current: asyncio.Task | None = None
@@ -228,9 +266,11 @@ async def ws_endpoint(ws: WebSocket):
                 await cancel_current()
                 current = asyncio.create_task(run_turn(ws, session_id, text[:8000], offer_pending))
                 offer_pending = False  # only the first reply can answer the greeting
-            elif kind == "incidents":
+            elif kind == "toggle" and msg.get("service") in services:
                 await cancel_current()
-                current = asyncio.create_task(toggle_incidents(ws, session_id, bool(msg.get("enabled"))))
+                current = asyncio.create_task(
+                    toggle_service(ws, session_id, msg["service"], bool(msg.get("enabled")))
+                )
                 offer_pending = False
             elif kind == "cancel":
                 await cancel_current()
@@ -241,5 +281,6 @@ async def ws_endpoint(ws: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
-        unsubscribe()
+        for unsubscribe in unsubscribers:
+            unsubscribe()
         await cancel_current()

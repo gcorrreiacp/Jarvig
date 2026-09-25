@@ -1,25 +1,34 @@
-"""Incident analysis: runs the Gmail alert watcher in the background while enabled.
+"""Background services the bridge can switch on and off: incident analysis and the incident dispatcher.
 
-One watcher serves the whole bridge. It starts switched off every time the bridge
-starts; the HUD greeting offers to switch it on, and it can be toggled by chat,
-by the HUD button, or via /api/incidents.
+Each service wraps a job object with `run_once() -> dict of counts`, `poll_seconds`
+and `dry_run`. The job is built when the service starts (so a bad config or login
+shows up as a readable error), then polled until the service is stopped. Services
+always start switched off when the bridge starts.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
-log = logging.getLogger("incidents")
+log = logging.getLogger("services")
 
 Listener = Callable[[dict], Awaitable[None]]
 
 
-class IncidentAnalysis:
-    def __init__(self):
+class StopService(Exception):
+    """Raised by a job when retrying cannot help (bad login, missing permission)."""
+
+
+class PollingService:
+    def __init__(self, key: str, title: str, build: Callable[[], Any], fatal: tuple[type[Exception], ...] = ()):
+        self.key = key          # "analysis" | "dispatcher", used in the protocol
+        self.title = title      # "Incident analysis", used in replies
+        self._build = build
+        self._fatal = (StopService, *fatal)  # errors that stop the service instead of retrying
         self._task: asyncio.Task | None = None
-        self._watcher = None
+        self._job = None
         self._listeners: set[Listener] = set()
         self.last_run: str | None = None
         self.last_error: str | None = None
@@ -29,12 +38,16 @@ class IncidentAnalysis:
     def enabled(self) -> bool:
         return self._task is not None and not self._task.done()
 
+    @property
+    def job(self):
+        return self._job
+
     def status(self) -> dict:
-        filters = self._watcher.filters if self._watcher else None
         return {
+            "service": self.key,
             "enabled": self.enabled,
-            "dry_run": bool(self._watcher and self._watcher.dry_run),
-            "poll_seconds": filters.poll_seconds if filters else None,
+            "dry_run": bool(self._job and self._job.dry_run),
+            "poll_seconds": self._job.poll_seconds if self._job else None,
             "last_run": self.last_run,
             "last_error": self.last_error,
             "totals": self.totals,
@@ -53,11 +66,11 @@ class IncidentAnalysis:
                 self._listeners.discard(listener)
 
     async def start(self) -> None:
-        """Connect to Gmail and start polling. Raises RuntimeError with a readable message on failure."""
+        """Build the job and start polling. Raises RuntimeError with a readable message on failure."""
         if self.enabled:
             return
         try:
-            self._watcher = await asyncio.to_thread(_build_watcher)
+            self._job = await asyncio.to_thread(self._build)
         except Exception as exc:
             self.last_error = str(exc)
             await self._publish()
@@ -65,7 +78,7 @@ class IncidentAnalysis:
         self.last_error = None
         self.totals = {}
         self._task = asyncio.create_task(self._loop())
-        log.info("Incident analysis enabled%s", " (dry run)" if self._watcher.dry_run else "")
+        log.info("%s enabled%s", self.title, " (dry run)" if self._job.dry_run else "")
         await self._publish()
 
     async def stop(self) -> None:
@@ -76,37 +89,39 @@ class IncidentAnalysis:
             except asyncio.CancelledError:
                 pass
             self._task = None
-            log.info("Incident analysis disabled")
+            log.info("%s disabled", self.title)
         await self._publish()
 
     async def _loop(self) -> None:
-        from connectors.gmail_watcher import is_rate_limit
         from googleapiclient.errors import HttpError
+
+        from connectors.gmail_watcher import is_rate_limit
 
         while True:
             try:
-                counts = await asyncio.to_thread(self._watcher.run_once)
+                counts = await asyncio.to_thread(self._job.run_once)
                 for key, value in counts.items():
-                    if key != "checked":
+                    if key != "checked" and isinstance(value, int):
                         self.totals[key] = self.totals.get(key, 0) + value
-                self.last_error = None
+                self.last_error = counts.get("error")
+            except self._fatal as exc:
+                await self._fail(str(exc))
+                return
             except HttpError as exc:
                 if exc.resp.status in (401, 403) and not is_rate_limit(exc):
-                    self.last_error = "Gmail refused access. Run: python -m connectors.gmail auth --modify"
-                    log.error(self.last_error)
-                    self._task = None
-                    await self._publish()
+                    await self._fail("Gmail refused access. Run: python -m connectors.gmail auth --modify")
                     return
                 self.last_error = f"Gmail error, retrying: {exc.reason}"
-                log.warning(self.last_error)
+                log.warning("%s: %s", self.title, self.last_error)
             except Exception as exc:  # network drops etc.: keep polling
                 self.last_error = f"Retrying after error: {exc}"
-                log.warning(self.last_error)
+                log.warning("%s: %s", self.title, self.last_error)
             self.last_run = datetime.now(timezone.utc).isoformat(timespec="seconds")
             await self._publish()
-            await asyncio.sleep(self._watcher.filters.poll_seconds)
+            await asyncio.sleep(self._job.poll_seconds)
 
-
-def _build_watcher():
-    from connectors.gmail_watcher import AlertWatcher, Filters
-    return AlertWatcher(Filters.load())
+    async def _fail(self, message: str) -> None:
+        self.last_error = message
+        log.error("%s stopped: %s", self.title, message)
+        self._task = None
+        await self._publish()

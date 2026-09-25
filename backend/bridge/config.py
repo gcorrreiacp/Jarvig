@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-5"
     claude_code_cli: str = "claude"
     claude_code_model: str = ""
+    # Incident dispatcher: candidate alert emails are uploaded here as text files.
+    ftp_host: str = ""
+    ftp_port: int = 21
+    ftp_user: str = ""
+    ftp_password: str = ""
+    ftp_dir: str = "/incidents"
+    ftp_tls: bool = True
+    dispatch_poll_seconds: int = 60
     webhook_url: str = ""
     webhook_token: str = ""
     custom_agent: str = "agent.examples.my_agent:MyAgent"

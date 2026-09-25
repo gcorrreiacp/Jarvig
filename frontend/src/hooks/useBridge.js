@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 function sessionId() {
   try {
-    let id = sessionStorage.getItem("aura-session");
+    let id = sessionStorage.getItem("jarvig-session");
     if (!id) {
       id = crypto.randomUUID();
-      sessionStorage.setItem("aura-session", id);
+      sessionStorage.setItem("jarvig-session", id);
     }
     return id;
   } catch {
@@ -26,7 +26,10 @@ function bridgeUrl(session) {
 export function useBridge({ onReply } = {}) {
   const [status, setStatus] = useState("connecting"); // connecting | online | offline
   const [meta, setMeta] = useState({ assistant: "J.A.R.V.I.G.", agent: null });
-  const [incidents, setIncidents] = useState({ enabled: false, totals: {} });
+  const [services, setServices] = useState({
+    analysis: { enabled: false, totals: {} },
+    dispatcher: { enabled: false, totals: {} },
+  });
   const [messages, setMessages] = useState([]);
   const [busy, setBusy] = useState(false);
   const [metrics, setMetrics] = useState({ rtt: null, firstToken: null, total: null, turns: 0 });
@@ -67,8 +70,8 @@ export function useBridge({ onReply } = {}) {
             setMetrics((m) => ({ ...m, turns: msg.turns ?? 0 }));
             document.title = msg.assistant;
             break;
-          case "incidents":
-            setIncidents(msg);
+          case "service":
+            setServices((all) => ({ ...all, [msg.service]: msg }));
             break;
           case "pong":
             setMetrics((m) => ({ ...m, rtt: Math.round(performance.now() - msg.t) }));
@@ -140,7 +143,7 @@ export function useBridge({ onReply } = {}) {
 
   const cancel = useCallback(() => raw({ type: "cancel" }), []);
   const reset = useCallback(() => raw({ type: "reset" }), []);
-  const toggleIncidents = useCallback((enabled) => raw({ type: "incidents", enabled }), []);
+  const toggleService = useCallback((service, enabled) => raw({ type: "toggle", service, enabled }), []);
 
-  return { status, meta, messages, busy, metrics, incidents, send, cancel, reset, toggleIncidents, session };
+  return { status, meta, messages, busy, metrics, services, send, cancel, reset, toggleService, session };
 }

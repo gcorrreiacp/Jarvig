@@ -54,9 +54,9 @@ export default function App() {
           status={bridge.status}
           meta={bridge.meta}
           metrics={bridge.metrics}
-          incidents={bridge.incidents}
+          services={bridge.services}
           onReset={bridge.reset}
-          onToggleIncidents={bridge.toggleIncidents}
+          onToggleService={bridge.toggleService}
         />
         <div className="hud__center">
           <Core state={state} name={name} />
