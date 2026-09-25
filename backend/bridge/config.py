@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     ftp_dir: str = "/incidents"
     ftp_tls: bool = True
     dispatch_poll_seconds: int = 60
+    # MR summarizer / MR reviewer: GitHub pull requests of this repository.
+    github_token: str = ""
+    github_repo: str = ""
+    pr_poll_seconds: int = 120
+    pr_post_comments: bool = True
+    pr_max_diff_chars: int = 60000
     webhook_url: str = ""
     webhook_token: str = ""
     custom_agent: str = "agent.examples.my_agent:MyAgent"
