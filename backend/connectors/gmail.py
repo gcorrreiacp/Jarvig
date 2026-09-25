@@ -1,10 +1,11 @@
-"""Read-only Gmail connector.
+"""Gmail connector: reads messages in full, and can label/move them when authorised to.
 
 Setup (once):
     1. In Google Cloud Console, enable the Gmail API and create an OAuth client
        of type "Desktop app". Download the JSON as backend/credentials.json.
     2. From backend/, run:  python -m connectors.gmail auth
-       A browser opens for consent; the token is saved to token.json.
+       (or `auth --modify` to also allow labelling and moving messages, which the
+       alert watcher needs). A browser opens for consent; the token is saved to token.json.
 
 Usage:
     python -m connectors.gmail list --query "is:unread" --max 10
@@ -36,9 +37,31 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-CREDENTIALS_FILE = Path(os.getenv("GMAIL_CREDENTIALS_FILE", "credentials.json"))
-TOKEN_FILE = Path(os.getenv("GMAIL_TOKEN_FILE", "token.json"))
+READ_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+MODIFY_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+SCOPES = READ_SCOPES
+
+# A scope also satisfies every scope it is broader than.
+_IMPLIED = {
+    "https://mail.google.com/": {READ_SCOPES[0], MODIFY_SCOPES[0]},
+    MODIFY_SCOPES[0]: {READ_SCOPES[0]},
+}
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+# Gmail limits calls per user per minute; the client backs off exponentially on
+# rate-limit and server errors (up to about two minutes in total).
+RETRIES = 7
+
+
+def _backend_path(value: str) -> Path:
+    """Relative paths are taken from backend/, so the CLI works from any folder."""
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else BACKEND_DIR / path
+
+
+CREDENTIALS_FILE = _backend_path(os.getenv("GMAIL_CREDENTIALS_FILE", "credentials.json"))
+TOKEN_FILE = _backend_path(os.getenv("GMAIL_TOKEN_FILE", "token.json"))
 
 
 @dataclass
@@ -102,10 +125,20 @@ def html_to_text(html: str) -> str:
     return parser.text()
 
 
-def get_credentials(interactive: bool = False) -> Credentials:
+def _covers(granted, wanted: list[str]) -> bool:
+    have = set(granted or [])
+    for scope in list(have):
+        have |= _IMPLIED.get(scope, set())
+    return set(wanted) <= have
+
+
+def get_credentials(interactive: bool = False, scopes: list[str] = READ_SCOPES) -> Credentials:
     creds = None
     if TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        # Load with the scopes the token was granted, then check they cover what is needed.
+        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE))
+        if not _covers(creds.scopes, scopes):
+            creds = None
     if creds and creds.valid:
         return creds
     if creds and creds.expired and creds.refresh_token:
@@ -113,18 +146,57 @@ def get_credentials(interactive: bool = False) -> Credentials:
     elif interactive:
         if not CREDENTIALS_FILE.exists():
             raise FileNotFoundError(f"OAuth client file not found: {CREDENTIALS_FILE}")
-        flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+        flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), scopes)
         creds = flow.run_local_server(port=0)
     else:
-        raise RuntimeError("Gmail is not authorised yet. Run: python -m connectors.gmail auth")
+        flag = " --modify" if scopes != READ_SCOPES else ""
+        raise RuntimeError(f"Gmail is not authorised for this yet. Run: python -m connectors.gmail auth{flag}")
     TOKEN_FILE.write_text(creds.to_json())
     return creds
 
 
 class GmailConnector:
-    def __init__(self, creds: Credentials | None = None):
-        self.service = build("gmail", "v1", credentials=creds or get_credentials(), cache_discovery=False)
+    def __init__(self, creds: Credentials | None = None, scopes: list[str] = READ_SCOPES):
+        creds = creds or get_credentials(scopes=scopes)
+        self.service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         self.users = self.service.users()
+        self._label_ids: dict[str, str] = {}
+
+    def list_ids(self, query: str, limit: int = 500) -> list[str]:
+        """IDs of messages matching a Gmail query, newest first."""
+        ids: list[str] = []
+        page_token = None
+        while len(ids) < limit:
+            resp = self.users.messages().list(
+                userId="me", q=query, maxResults=min(limit - len(ids), 500), pageToken=page_token
+            ).execute(num_retries=RETRIES)
+            ids.extend(m["id"] for m in resp.get("messages", []))
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+        return ids
+
+    def label_id(self, name: str) -> str:
+        """ID of the user label with this name, created if it does not exist. Needs the modify scope."""
+        if name in self._label_ids:
+            return self._label_ids[name]
+        for label in self.users.labels().list(userId="me").execute(num_retries=RETRIES).get("labels", []):
+            if label["name"].lower() == name.lower():
+                self._label_ids[name] = label["id"]
+                return label["id"]
+        created = self.users.labels().create(
+            userId="me", body={"name": name, "labelListVisibility": "labelShow", "messageListVisibility": "show"}
+        ).execute(num_retries=RETRIES)
+        self._label_ids[name] = created["id"]
+        return created["id"]
+
+    def relabel(self, message_ids: list[str], add: list[str] = (), remove: list[str] = ()) -> None:
+        """Add/remove label IDs on many messages at once. Needs the modify scope."""
+        for start in range(0, len(message_ids), 1000):
+            self.users.messages().batchModify(
+                userId="me",
+                body={"ids": message_ids[start:start + 1000], "addLabelIds": list(add), "removeLabelIds": list(remove)},
+            ).execute(num_retries=RETRIES)
 
     def search(self, query: str = "", max_results: int = 10, label_ids: list[str] | None = None) -> list[dict]:
         """Return summaries (id, threadId, from, subject, date, snippet) for messages matching a Gmail query."""
@@ -137,7 +209,7 @@ class GmailConnector:
                 labelIds=label_ids,
                 maxResults=min(max_results - len(ids), 500),
                 pageToken=page_token,
-            ).execute()
+            ).execute(num_retries=RETRIES)
             ids.extend(resp.get("messages", []))
             page_token = resp.get("nextPageToken")
             if not page_token:
@@ -147,7 +219,7 @@ class GmailConnector:
         for ref in ids[:max_results]:
             msg = self.users.messages().get(
                 userId="me", id=ref["id"], format="metadata", metadataHeaders=["From", "Subject", "Date"]
-            ).execute()
+            ).execute(num_retries=RETRIES)
             headers = {h["name"].lower(): h["value"] for h in msg.get("payload", {}).get("headers", [])}
             summaries.append({
                 "id": msg["id"],
@@ -161,7 +233,7 @@ class GmailConnector:
 
     def read(self, message_id: str) -> Email:
         """Fetch one message in full: all headers, the complete body, and attachment details."""
-        msg = self.users.messages().get(userId="me", id=message_id, format="raw").execute()
+        msg = self.users.messages().get(userId="me", id=message_id, format="raw").execute(num_retries=RETRIES)
         raw = base64.urlsafe_b64decode(msg["raw"])
         parsed: EmailMessage = email.message_from_bytes(raw, policy=default_policy)
 
@@ -200,7 +272,7 @@ class GmailConnector:
 
     def read_thread(self, thread_id: str) -> list[Email]:
         """Fetch every message in a conversation, oldest first."""
-        thread = self.users.threads().get(userId="me", id=thread_id, format="minimal").execute()
+        thread = self.users.threads().get(userId="me", id=thread_id, format="minimal").execute(num_retries=RETRIES)
         return [self.read(m["id"]) for m in thread.get("messages", [])]
 
 
@@ -216,9 +288,10 @@ def _print_email(e: Email) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="python -m connectors.gmail", description="Read-only Gmail connector")
+    parser = argparse.ArgumentParser(prog="python -m connectors.gmail", description="Gmail connector")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("auth", help="Run the OAuth consent flow and save token.json")
+    au = sub.add_parser("auth", help="Run the OAuth consent flow and save token.json")
+    au.add_argument("--modify", action="store_true", help="Also allow labelling and moving messages")
     ls = sub.add_parser("list", help="List messages matching a Gmail search query")
     ls.add_argument("--query", "-q", default="in:inbox")
     ls.add_argument("--max", "-n", type=int, default=10)
@@ -229,7 +302,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.cmd == "auth":
-        get_credentials(interactive=True)
+        get_credentials(interactive=True, scopes=MODIFY_SCOPES if args.modify else READ_SCOPES)
         print(f"Authorised. Token saved to {TOKEN_FILE}")
         return
 

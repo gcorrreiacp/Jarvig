@@ -6,8 +6,10 @@ WebSocket protocol (/ws?session=<id>):
     {"type": "cancel"}                 stop the reply in progress
     {"type": "reset"}                  clear this session's history
     {"type": "ping", "t": <ms>}        latency probe
+    {"type": "incidents", "enabled": bool}   switch incident analysis on/off
   server -> client
     {"type": "hello", assistant, agent, session_id, turns}
+    {"type": "incidents", enabled, dry_run, poll_seconds, last_run, last_error, totals}
     {"type": "start", id}
     {"type": "token", id, text}
     {"type": "done", id, text, first_token_ms, total_ms, turns}
@@ -28,13 +30,16 @@ from pydantic import BaseModel, Field
 
 from agent import Agent, AgentError, Message, build_agent
 
+from . import commands
 from .config import get_settings
+from .incidents import IncidentAnalysis
 from .sessions import SessionStore
 
 log = logging.getLogger("bridge")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 settings = get_settings()
 sessions = SessionStore(settings.history_limit)
+incidents = IncidentAnalysis()
 
 
 @asynccontextmanager
@@ -44,6 +49,7 @@ async def lifespan(app: FastAPI):
     app.state.agent = agent
     log.info("Agent ready: %s", agent.info())
     yield
+    await incidents.stop()
     await agent.shutdown()
 
 
@@ -89,6 +95,21 @@ async def chat(req: ChatRequest):
     return {"reply": reply, "session_id": req.session_id}
 
 
+class IncidentToggle(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/incidents")
+async def incidents_status():
+    return incidents.status()
+
+
+@app.post("/api/incidents")
+async def incidents_toggle(req: IncidentToggle):
+    reply = await (commands.enable(incidents) if req.enabled else commands.disable(incidents))
+    return {"reply": reply, **incidents.status()}
+
+
 @app.post("/api/sessions/{session_id}/reset")
 async def reset(session_id: str):
     sessions.reset(session_id)
@@ -101,7 +122,28 @@ async def safe_send(ws: WebSocket, payload: dict) -> None:
         await ws.send_json(payload)
 
 
-async def run_turn(ws: WebSocket, session_id: str, text: str) -> None:
+async def say(ws: WebSocket, session_id: str, text: str) -> None:
+    """Send a reply the bridge wrote itself, shaped like an agent turn so the HUD shows and speaks it."""
+    turn_id = uuid.uuid4().hex[:12]
+    await safe_send(ws, {"type": "start", "id": turn_id})
+    await safe_send(ws, {"type": "token", "id": turn_id, "text": text})
+    await safe_send(ws, {"type": "done", "id": turn_id, "text": text, "turns": sessions.turns(session_id), "local": True})
+
+
+async def toggle_incidents(ws: WebSocket, session_id: str, enabled: bool) -> None:
+    """The HUD's on/off button."""
+    reply = await (commands.enable(incidents) if enabled else commands.disable(incidents))
+    await say(ws, session_id, reply)
+
+
+async def run_turn(ws: WebSocket, session_id: str, text: str, offer_pending: bool = False) -> None:
+    reply = await commands.handle(text, incidents, offer_pending)
+    if reply is not None:
+        sessions.append(session_id, Message("user", text))
+        sessions.append(session_id, Message("assistant", reply))
+        await say(ws, session_id, reply)
+        return
+
     turn_id = uuid.uuid4().hex[:12]
     agent = agent_of(ws.app)
     sessions.append(session_id, Message("user", text))
@@ -154,6 +196,14 @@ async def ws_endpoint(ws: WebSocket):
         "session_id": session_id,
         "turns": sessions.turns(session_id),
     })
+    unsubscribe = incidents.subscribe(lambda status: ws.send_json({"type": "incidents", **status}))
+    await ws.send_json({"type": "incidents", **incidents.status()})
+
+    # Greet a new conversation. Not stored in history: agents expect it to start with the user.
+    offer_pending = False
+    if sessions.turns(session_id) == 0:
+        text, offer_pending = commands.greeting(settings.assistant_name, incidents)
+        await say(ws, session_id, text)
 
     current: asyncio.Task | None = None
 
@@ -176,7 +226,12 @@ async def ws_endpoint(ws: WebSocket):
                 if not text:
                     continue
                 await cancel_current()
-                current = asyncio.create_task(run_turn(ws, session_id, text[:8000]))
+                current = asyncio.create_task(run_turn(ws, session_id, text[:8000], offer_pending))
+                offer_pending = False  # only the first reply can answer the greeting
+            elif kind == "incidents":
+                await cancel_current()
+                current = asyncio.create_task(toggle_incidents(ws, session_id, bool(msg.get("enabled"))))
+                offer_pending = False
             elif kind == "cancel":
                 await cancel_current()
             elif kind == "reset":
@@ -186,4 +241,5 @@ async def ws_endpoint(ws: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
+        unsubscribe()
         await cancel_current()

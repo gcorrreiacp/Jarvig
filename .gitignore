@@ -7,6 +7,9 @@ env.
 credentials.json
 token.json
 client_secret*.json
+# Gmail alert watcher: your own rules and the queue of candidate emails (contains email content)
+backend/alert_filters.json
+backend/data/
 
 # ---- Python ----
 .venv/

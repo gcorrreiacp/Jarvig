@@ -14,9 +14,13 @@ function pickVoice() {
   return voices[0] ?? null;
 }
 
-// Strip markdown so speech sounds natural.
+// Strip markdown so speech sounds natural, and say the name as a word, not letters.
 const speakable = (t) =>
-  t.replace(/```[\s\S]*?```/g, " code block omitted. ").replace(/[*_#`>]/g, "").replace(/\[(.*?)\]\(.*?\)/g, "$1");
+  t.replace(/```[\s\S]*?```/g, " code block omitted. ").replace(/[*_#`>]/g, "").replace(/\[(.*?)\]\(.*?\)/g, "$1")
+    .replace(/J\.A\.R\.V\.I\.G\./g, "Jarvig");
+
+// Browsers refuse to speak before the first click or key press on the page.
+const hasUserActivation = () => navigator.userActivation?.hasBeenActive ?? true;
 
 /** Browser speech-to-text and text-to-speech. Works best in Chrome/Edge. */
 export function useSpeech({ onFinal } = {}) {
@@ -74,6 +78,18 @@ export function useSpeech({ onFinal } = {}) {
 
   const speak = useCallback((text) => {
     if (!window.speechSynthesis || !text) return;
+    if (!hasUserActivation()) {
+      // e.g. the greeting on page load: say it on the first interaction instead of losing it.
+      const later = (e) => {
+        window.removeEventListener("pointerdown", later);
+        window.removeEventListener("keydown", later);
+        // Not when that first key press is push-to-talk: the mic would hear the greeting.
+        if (!(e.ctrlKey && e.code === "Space")) speakRef.current?.(text);
+      };
+      window.addEventListener("pointerdown", later, { once: true });
+      window.addEventListener("keydown", later, { once: true });
+      return;
+    }
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(speakable(text));
     const v = pickVoice();
@@ -84,6 +100,8 @@ export function useSpeech({ onFinal } = {}) {
     u.onend = u.onerror = () => setSpeaking(false);
     window.speechSynthesis.speak(u);
   }, []);
+  const speakRef = useRef(speak);
+  speakRef.current = speak;
 
   return {
     supported: Boolean(Recognition),
