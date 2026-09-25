@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useBridge } from "./hooks/useBridge.js";
+import { apiUrl, useBridge } from "./hooks/useBridge.js";
 import { useSpeech } from "./hooks/useSpeech.js";
 import Core from "./components/Core.jsx";
 import Transcript from "./components/Transcript.jsx";
@@ -12,10 +12,18 @@ export default function App() {
   const voiceRef = useRef(voiceReplies);
   voiceRef.current = voiceReplies;
   const speakRef = useRef(null);
+  const auraRef = useRef(null);
 
   const bridge = useBridge({ onReply: (text) => voiceRef.current && speakRef.current?.(text) });
-  const speech = useSpeech({ onFinal: (text) => bridge.send(text) });
+  const speech = useSpeech({ onFinal: (text) => bridge.send(text), voice: auraRef });
   speakRef.current = speech.speak;
+
+  // While listening, the orb moves with the user's voice
+  useEffect(() => {
+    if (!speech.listening) return;
+    auraRef.current?.useMic().catch(() => { /* no mic permission: the orb just stays calm */ });
+    return () => auraRef.current?.releaseMic();
+  }, [speech.listening]);
 
   // Ctrl+Space: push to talk. Esc: stop everything.
   useEffect(() => {
@@ -59,7 +67,7 @@ export default function App() {
           onToggleService={bridge.toggleService}
         />
         <div className="hud__center">
-          <Core state={state} name={name} />
+          <Core ref={auraRef} state={state} name={name} ttsUrl={bridge.meta.tts ? apiUrl("/api/tts") : null} />
         </div>
         <Transcript
           messages={bridge.messages}

@@ -196,7 +196,9 @@ provider. Both services start **off** each time the backend starts.
 
 ### The screen
 
-- **Centre:** the core changes colour with J.A.R.V.I.G.'s state (idle, listening, thinking, speaking, offline).
+- **Centre:** the core, a voice-reactive orb inside rings. It changes colour with J.A.R.V.I.G.'s state
+  (idle, listening, thinking, speaking, offline), moves with the voice while it speaks and with your
+  microphone while you talk.
 - **Right, Conversation:** everything said so far.
 - **Left, Systems:** connection, AI provider and speed, both services with their counts, and on/off
   buttons for each. (Hidden on windows narrower than 1100 px; voice commands still work.)
@@ -206,6 +208,16 @@ provider. Both services start **off** each time the backend starts.
 
 Browsers only allow speech after your first click or key press, so the greeting is read aloud on your
 first click.
+
+### The voice
+
+J.A.R.V.I.G. speaks with a male voice:
+
+- **ElevenLabs**, when `ELEVENLABS_API_KEY` is set in `backend/.env`. The bridge serves it at
+  `POST /api/tts`, so the key never reaches the browser, and the orb reacts to the real audio.
+  The default is "George", a British male voice; change it with `ELEVENLABS_VOICE_ID`.
+- **The browser's built-in voice** otherwise, a male English voice such as Daniel (the list is
+  `MALE_VOICE` in `frontend/src/components/Core.jsx`). The orb's movement is simulated from word timing.
 
 ### How an alert moves through Gmail
 
@@ -268,6 +280,7 @@ email text.
 | `CUSTOM_AGENT` | example agent | For `custom`, as `module:ClassName` |
 | `FTP_HOST`, `FTP_PORT`, `FTP_USER`, `FTP_PASSWORD`, `FTP_DIR`, `FTP_TLS` | `21`, `/incidents`, `true` | Incident dispatcher target |
 | `DISPATCH_POLL_SECONDS` | `60` | How often the dispatcher checks for candidates |
+| `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL` | none, "George", `eleven_multilingual_v2` | Optional ElevenLabs voice; empty key uses the browser voice |
 | `CORS_ORIGINS`, `HISTORY_LIMIT` | | Allowed frontend origins; messages remembered per conversation |
 
 `.env` is read from `backend/` (or the project root) wherever you start the backend from.
@@ -329,6 +342,7 @@ for example `export GMAIL_TOKEN_FILE=/secure/token.json`. The variables are `GMA
 | POST | `/api/chat` | `{"text", "session_id"}` → `{"reply"}`, for scripts |
 | GET / POST | `/api/incidents` | Incident analysis status / `{"enabled": true}` |
 | GET / POST | `/api/dispatcher` | Incident dispatcher status / `{"enabled": true}` |
+| POST | `/api/tts` | `{"text"}` → `audio/mpeg` via ElevenLabs (404 when no key is set) |
 | GET | `/api/agent` | Assistant name, provider and model |
 | POST | `/api/sessions/{id}/reset` | Clear a conversation's memory |
 | GET | `/api/health` | Liveness |
@@ -346,7 +360,7 @@ for example `export GMAIL_TOKEN_FILE=/secure/token.json`. The variables are `GMA
 
 | Folder | Contents |
 |---|---|
-| `frontend/src` | The HUD: `App.jsx`, `components/`, `hooks/useBridge.js` (connection), `hooks/useSpeech.js` (voice) |
+| `frontend/src` | The HUD: `App.jsx`, `components/`, `hooks/useBridge.js` (connection), `hooks/useSpeech.js` (voice), `aura/` (the three.js orb) |
 | `backend/bridge` | Web server (`main.py`), built-in commands (`commands.py`), background services (`services.py`), settings (`config.py`) |
 | `backend/agent` | AI providers (`adapters/`) and a template for your own (`examples/my_agent.py`) |
 | `backend/connectors` | Gmail (`gmail.py`), incident analysis (`gmail_watcher.py`), incident dispatcher (`incident_dispatcher.py`) |

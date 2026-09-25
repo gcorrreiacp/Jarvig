@@ -19,13 +19,19 @@ function bridgeUrl(session) {
   return `${base}${base.includes("?") ? "&" : "?"}session=${encodeURIComponent(session)}`;
 }
 
+/** REST URL on the bridge; follows VITE_BRIDGE_WS when the bridge lives on another host. */
+export function apiUrl(path) {
+  const explicit = import.meta.env.VITE_BRIDGE_WS;
+  return explicit ? new URL(path, explicit.replace(/^ws/, "http")).href : path;
+}
+
 /**
  * WebSocket link to the FastAPI bridge.
  * Handles reconnects, streaming tokens, cancel/reset and latency probes.
  */
 export function useBridge({ onReply } = {}) {
   const [status, setStatus] = useState("connecting"); // connecting | online | offline
-  const [meta, setMeta] = useState({ assistant: "J.A.R.V.I.G.", agent: null });
+  const [meta, setMeta] = useState({ assistant: "J.A.R.V.I.G.", agent: null, tts: false });
   const [services, setServices] = useState({
     analysis: { enabled: false, totals: {} },
     dispatcher: { enabled: false, totals: {} },
@@ -66,7 +72,7 @@ export function useBridge({ onReply } = {}) {
         const msg = JSON.parse(ev.data);
         switch (msg.type) {
           case "hello":
-            setMeta({ assistant: msg.assistant, agent: msg.agent });
+            setMeta({ assistant: msg.assistant, agent: msg.agent, tts: Boolean(msg.tts) });
             setMetrics((m) => ({ ...m, turns: msg.turns ?? 0 }));
             document.title = msg.assistant;
             break;

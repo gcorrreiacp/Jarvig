@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     webhook_token: str = ""
     custom_agent: str = "agent.examples.my_agent:MyAgent"
 
+    # Assistant voice: ElevenLabs text-to-speech served from /api/tts. Empty key = browser voice.
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"  # "George", British male
+    elevenlabs_model: str = "eleven_multilingual_v2"
+
     cors_origins: str = "http://localhost:5173,http://localhost:8080"
     history_limit: int = 20
 

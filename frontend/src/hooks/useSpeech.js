@@ -2,18 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const Recognition = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
 
-function pickVoice() {
-  const voices = window.speechSynthesis?.getVoices() ?? [];
-  const prefs = [/en-GB/i, /en-AU/i, /en-US/i, /^en/i];
-  for (const p of prefs) {
-    const male = voices.find((v) => p.test(v.lang) && /male|daniel|arthur|george|oliver/i.test(v.name));
-    if (male) return male;
-    const any = voices.find((v) => p.test(v.lang));
-    if (any) return any;
-  }
-  return voices[0] ?? null;
-}
-
 // Strip markdown so speech sounds natural, and say the name as a word, not letters.
 const speakable = (t) =>
   t.replace(/```[\s\S]*?```/g, " code block omitted. ").replace(/[*_#`>]/g, "").replace(/\[(.*?)\]\(.*?\)/g, "$1")
@@ -22,13 +10,18 @@ const speakable = (t) =>
 // Browsers refuse to speak before the first click or key press on the page.
 const hasUserActivation = () => navigator.userActivation?.hasBeenActive ?? true;
 
-/** Browser speech-to-text and text-to-speech. Works best in Chrome/Edge. */
-export function useSpeech({ onFinal } = {}) {
+/**
+ * Browser speech-to-text, and text-to-speech through the Aura orb (`voice` is its ref),
+ * which picks the voice (server TTS, ElevenLabs or the built-in one) and animates with it.
+ * Recognition works best in Chrome/Edge.
+ */
+export function useSpeech({ onFinal, voice } = {}) {
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [interim, setInterim] = useState("");
   const [error, setError] = useState(null);
   const recRef = useRef(null);
+  const turn = useRef(0);
   const onFinalRef = useRef(onFinal);
   onFinalRef.current = onFinal;
 
@@ -53,14 +46,15 @@ export function useSpeech({ onFinal } = {}) {
     };
     rec.onend = () => setListening(false);
     recRef.current = rec;
-    window.speechSynthesis?.getVoices();
+    window.speechSynthesis?.getVoices(); // voices load lazily; ask early so the first reply has one
     return () => rec.abort();
   }, []);
 
   const stopSpeaking = useCallback(() => {
-    window.speechSynthesis?.cancel();
+    turn.current++;
+    voice?.current?.stop();
     setSpeaking(false);
-  }, []);
+  }, [voice]);
 
   const listen = useCallback(() => {
     if (!recRef.current) return;
@@ -76,8 +70,8 @@ export function useSpeech({ onFinal } = {}) {
 
   const stopListening = useCallback(() => recRef.current?.stop(), []);
 
-  const speak = useCallback((text) => {
-    if (!window.speechSynthesis || !text) return;
+  const speak = useCallback(async (text) => {
+    if (!voice?.current || !text) return;
     if (!hasUserActivation()) {
       // e.g. the greeting on page load: say it on the first interaction instead of losing it.
       const later = (e) => {
@@ -90,16 +84,16 @@ export function useSpeech({ onFinal } = {}) {
       window.addEventListener("keydown", later, { once: true });
       return;
     }
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(speakable(text));
-    const v = pickVoice();
-    if (v) u.voice = v;
-    u.rate = 1.02;
-    u.pitch = 0.9;
-    u.onstart = () => setSpeaking(true);
-    u.onend = u.onerror = () => setSpeaking(false);
-    window.speechSynthesis.speak(u);
-  }, []);
+    const mine = ++turn.current; // a newer reply interrupts this one; only the latest clears "speaking"
+    setSpeaking(true);
+    try {
+      await voice.current.say(speakable(text));
+    } catch (e) {
+      setError(`Voice: ${e.message}`);
+    } finally {
+      if (turn.current === mine) setSpeaking(false);
+    }
+  }, [voice]);
   const speakRef = useRef(speak);
   speakRef.current = speak;
 
