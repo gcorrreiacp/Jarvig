@@ -1,7 +1,8 @@
 """Background services the bridge can switch on and off: incident analysis and the incident dispatcher.
 
 Each service wraps a job object with `run_once() -> dict of counts`, `poll_seconds`
-and `dry_run`. The job is built when the service starts (so a bad config or login
+and `dry_run`. A run can also return "announce": [{"text", "speak"}], which is said in
+every open HUD, and "error": "..." to show the last problem. The job is built when the service starts (so a bad config or login
 shows up as a readable error), then polled until the service is stopped. Services
 always start switched off when the bridge starts.
 """
@@ -30,6 +31,7 @@ class PollingService:
         self._task: asyncio.Task | None = None
         self._job = None
         self._listeners: set[Listener] = set()
+        self._announcers: set[Listener] = set()
         self.last_run: str | None = None
         self.last_error: str | None = None
         self.totals: dict[str, int] = {}
@@ -54,8 +56,22 @@ class PollingService:
         }
 
     def subscribe(self, listener: Listener) -> Callable[[], None]:
+        """Status updates, e.g. for the HUD's Systems panel."""
         self._listeners.add(listener)
         return lambda: self._listeners.discard(listener)
+
+    def on_announce(self, listener: Listener) -> Callable[[], None]:
+        """Things the service wants said, e.g. a new pull request summary."""
+        self._announcers.add(listener)
+        return lambda: self._announcers.discard(listener)
+
+    async def _announce(self, items: list[dict]) -> None:
+        for item in items:
+            for listener in list(self._announcers):
+                try:
+                    await listener(item)
+                except Exception:
+                    self._announcers.discard(listener)
 
     async def _publish(self) -> None:
         status = self.status()
@@ -100,6 +116,7 @@ class PollingService:
         while True:
             try:
                 counts = await asyncio.to_thread(self._job.run_once)
+                await self._announce(counts.pop("announce", []))
                 for key, value in counts.items():
                     if key != "checked" and isinstance(value, int):
                         self.totals[key] = self.totals.get(key, 0) + value

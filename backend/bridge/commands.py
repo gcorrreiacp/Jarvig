@@ -1,8 +1,8 @@
 """Built-in commands the bridge answers itself, before anything reaches the agent.
 
-Incident analysis and the incident dispatcher are switched on and off here rather
-than by the LLM, so the toggles are instant, work with every agent provider, and
-can't be misread.
+Incident analysis, the incident dispatcher, the MR summarizer and the MR reviewer are
+switched on and off here rather than by the LLM, so the toggles are instant, work
+with every agent provider, and can't be misread.
 """
 from __future__ import annotations
 
@@ -15,8 +15,14 @@ from .services import PollingService
 _MENTIONS = {
     "analysis": re.compile(r"\b(analysis|analy[sz]ing|alerts?|monitoring)\b|\bincidents?\b(?!\s+dispatch)", re.I),
     "dispatcher": re.compile(r"\b(dispatch(er|ing)?|ftp)\b", re.I),
+    "summarizer": re.compile(r"\bsummar(y|ies|i[sz]er|i[sz]ing|i[sz]es?)\b", re.I),
+    "reviewer": re.compile(r"\breview(ers?|s|ing)?\b|\bcorrections?\b", re.I),
 }
-_ALL = re.compile(r"\b(both|all|everything)\b", re.I)          # "start both", "stop all services"
+_MR = ("summarizer", "reviewer")
+# "turn off the MR features": a pull request mention without saying which feature means both.
+_MR_ANY = re.compile(r"\b(mrs?|merge requests?|pull requests?|prs?)\b", re.I)
+_BOTH = re.compile(r"\bboth\b", re.I)               # "start both": the incident pair, unless MRs are named
+_EVERY = re.compile(r"\b(all|everything)\b", re.I)  # "stop everything": all four
 _ACTIONS = {                                                      # checked in this order
     "disable": re.compile(r"\b(disable|stop|turn off|switch off|deactivate|pause|end|shut down)\b|\boff\b\s*[.!]*$", re.I),
     "enable": re.compile(r"\b(enable|start|turn on|switch on|activate|resume|begin)\b|\bon\b\s*[.!]*$", re.I),
@@ -29,7 +35,7 @@ _YES = re.compile(
     r"^\s*(yes|yeah|yep|yup|sure|ok(ay)?|please|go ahead|do it|affirmative|absolutely|of course|"
     r"enable( it)?|turn it on|switch it on|start( it)?|sim|claro|ja)\b", re.I)
 _NO = re.compile(r"^\s*(no|nope|nah|not now|not yet|later|no thanks|n[aã]o|nein)\b", re.I)
-_ORDER = ("analysis", "dispatcher")
+_ORDER = ("analysis", "dispatcher", "summarizer", "reviewer")
 
 
 def parse(text: str, offer_pending: bool = False) -> tuple[list[tuple[str, str]], bool]:
@@ -44,8 +50,12 @@ def parse(text: str, offer_pending: bool = False) -> tuple[list[tuple[str, str]]
         if not clause:
             continue
         targets = [key for key in _ORDER if _MENTIONS[key].search(clause)]
-        if not targets and _ALL.search(clause):
+        if _MR_ANY.search(clause) and not any(key in targets for key in _MR):
+            targets += list(_MR)
+        if not targets and _EVERY.search(clause):
             targets = list(_ORDER)
+        elif not targets and _BOTH.search(clause):
+            targets = ["analysis", "dispatcher"]
         if _NEGATED.search(clause):
             declined = declined or (offer_pending and not targets)
             verb = None
@@ -70,8 +80,14 @@ _ON_TEXT = {
                  "reports to analyzed, and everything else to discarded."),
     "dispatcher": ("Every {poll} seconds I'll upload new candidates to {target} as text files "
                    "and move them from candidates to dispatched."),
+    "summarizer": ("Every {poll} seconds I'll check {target} for new or updated pull requests and "
+                   "summarize their code changes{comment}."),
+    "reviewer": ("Every {poll} seconds I'll check {target} for new or updated pull requests and "
+                 "suggest corrections to their code{comment}."),
 }
-_PHRASE = {"analysis": "incident analysis", "dispatcher": "incident dispatcher"}
+_PHRASE = {"analysis": "incident analysis", "dispatcher": "incident dispatcher",
+           "summarizer": "MR summarizer", "reviewer": "MR reviewer"}
+_HANDLED = {"summarizer": "summarized", "reviewer": "reviewed"}
 _COUNT_NAMES = {"candidate": "candidates", "tidied": "already-dispatched removed from candidates"}
 
 
@@ -110,7 +126,9 @@ async def enable(service: PollingService) -> str:
     except RuntimeError as exc:
         return f"I couldn't start {_PHRASE[service.key]}: {exc}"
     status = service.status()
-    reply = f"{service.title} is on. " + _ON_TEXT[service.key].format(poll=status["poll_seconds"], target=_target(service))
+    comment = " and post it on GitHub" if getattr(service.job, "post_comments", False) else ""
+    reply = f"{service.title} is on. " + _ON_TEXT[service.key].format(
+        poll=status["poll_seconds"], target=_target(service), comment=comment)
     reply += f" Say \"turn off {_PHRASE[service.key]}\" to stop."
     if status["dry_run"]:
         reply += " Note: dry run is on in alert_filters.json, so I'm only logging, not moving emails."
@@ -140,6 +158,9 @@ def describe(service: PollingService) -> str:
 
 
 def _target(service: PollingService) -> str:
+    github = getattr(service.job, "github", None)
+    if github is not None:
+        return github.repo
     ftp = getattr(service.job, "ftp", None)
     return f"ftp://{ftp.host}{ftp.directory}" if ftp else "the FTP server"
 
@@ -147,6 +168,9 @@ def _target(service: PollingService) -> str:
 def _totals_sentence(service: PollingService) -> str:
     totals = service.totals
     if not any(totals.values()):
+        if service.key in _HANDLED:
+            return "No new pull requests so far."
         return "Nothing new so far." if service.key == "dispatcher" else "No new alerts sorted yet."
-    parts = [f"{count} {_COUNT_NAMES.get(name, name)}" for name, count in totals.items() if count]
+    names = {**_COUNT_NAMES, "handled": _HANDLED.get(service.key, "handled"), "commented": "posted on GitHub"}
+    parts = [f"{count} {names.get(name, name)}" for name, count in totals.items() if count]
     return "So far: " + ", ".join(parts) + "."
