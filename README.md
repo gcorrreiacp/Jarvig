@@ -8,8 +8,8 @@ comes back.
 - **Chat by voice or keyboard** with the AI of your choice (Claude, OpenAI, a local model, or your own agent).
 - **Incident analysis:** sorts alert emails in Gmail into *candidates*, *discarded* and *analyzed*.
 - **Incident dispatcher:** uploads candidate alerts to an FTP server as text files.
-- **MR summarizer:** explains what each new or updated GitHub pull request changes, from its code.
-- **MR reviewer:** suggests corrections for each new or updated pull request.
+- **MR summarizer:** posts a summary comment on each open GitHub pull request, based on its code.
+- **MR reviewer:** comments on the faulty lines of each open pull request with what to change.
 - Each feature is switched on and off on its own, by voice or button ("start the MR reviewer and incident analysis").
 
 ---
@@ -184,18 +184,16 @@ currently in `candidates`.**
 
 - **Repository access:** *Only select repositories* → the repository to watch.
 - **Permissions → Repository:** *Pull requests: Read and write* and *Contents: Read-only*.
-  (Read-only is enough for pull requests if you set `PR_POST_COMMENTS=false`.)
 
 **2. Add it to `backend/.env`:**
 
 ```ini
 GITHUB_TOKEN=github_pat_...
 GITHUB_REPO=owner/repository
-PR_POST_COMMENTS=true
 ```
 
-With `PR_POST_COMMENTS=true`, every summary and review is also posted as a comment on the pull request,
-**visible to everyone who can see it**. Set `false` to keep them in J.A.R.V.I.G. only.
+Summaries and reviews are posted on the pull requests, **visible to everyone who can see them**, and
+appear under the account the token belongs to.
 
 **3. Try it on one pull request first** (prints only; posts nothing):
 
@@ -206,8 +204,7 @@ python -m connectors.github_prs review <number>
 ```
 
 Restart the backend, then say "start the MR summarizer" and/or "start the MR reviewer". **When switched
-on, each one handles every open pull request it hasn't seen yet**, then only new ones and ones with new
-commits.
+on, each one handles every open pull request that doesn't have its comment yet**, up to 3 per check.
 
 ---
 
@@ -282,18 +279,27 @@ email text.
 
 ### How pull requests are summarized and reviewed
 
-Every `PR_POLL_SECONDS` (default 2 minutes), each feature that is on checks the open pull requests of
-`GITHUB_REPO`. A pull request is handled when it is new or has new commits:
+Every `PR_POLL_SECONDS` (default 2 minutes), each feature that is on looks at **every open pull request**
+of `GITHUB_REPO` and checks on GitHub whether it already did its part. What it posts carries a hidden
+marker with the commit it covers, and only markers written by the token's account count. So a pull
+request opened while J.A.R.V.I.G. was off is still picked up, and a post that failed is simply retried
+on the next check.
 
-1. Its **code diff** is fetched. The description and commit messages are deliberately **not** used, so
-   the result reflects what the code does. Lock files and binaries are left out; diffs longer than
-   `PR_MAX_DIFF_CHARS` are cut off and the result says it is partial.
-2. The AI writes a **summary** (MR summarizer) or **suggested corrections** with file and line (MR reviewer).
-3. J.A.R.V.I.G. says a short version aloud, shows the full text in the conversation, and posts it on the
-   pull request if `PR_POST_COMMENTS=true`.
+| | MR summarizer | MR reviewer |
+|---|---|---|
+| **Posts** | One general comment on the pull request with a summary of what the code changes | A GitHub review with a comment on each faulty line saying what to change, as a one-click *suggestion* when the fix is exact code |
+| **No problems?** | n/a | Still posts a review saying *no problems found*, which marks it as reviewed |
+| **New commits** | Edits its summary comment to match the latest code | Reviews only the changes since the commit it last reviewed |
 
-What each feature has handled is remembered in `backend/data/`, so restarting doesn't repeat work.
-Reviews come from an AI and can be wrong: treat them as suggestions.
+- The AI only sees the **code diff**; the description and commit messages are deliberately not used.
+  Lock files and binaries are left out; diffs longer than `PR_MAX_DIFF_CHARS` are cut off and the
+  result says it is partial.
+- Findings on lines GitHub doesn't allow comments on (outside the diff) are listed in the review's
+  overall text instead of being dropped.
+- Reviews are comment-only: J.A.R.V.I.G. never approves or blocks a merge.
+- Each result is also said aloud in short and shown in full in the conversation, and the latest ones are
+  given to the AI so you can ask about them.
+- Reviews come from an AI and can be wrong: treat them as suggestions.
 
 ---
 
@@ -314,7 +320,7 @@ Reviews come from an AI and can be wrong: treat them as suggestions.
 | `FTP login failed` / `FTP server refused TLS` | Check `FTP_USER`/`FTP_PASSWORD`; set `FTP_TLS=false` only if the server has no TLS. |
 | `GITHUB_TOKEN is empty` / `GitHub rejected the token (401)` | Create a token ([Connecting GitHub](#connecting-github-for-the-mr-summarizer-and-mr-reviewer)) and put it in `backend/.env`; restart. |
 | `Repository … not found (404)` | Check `GITHUB_REPO` is `owner/name`, and that the token was given access to that repository. |
-| `GitHub refused the comment (403)` | The token needs *Pull requests: Read and write*, or set `PR_POST_COMMENTS=false`. |
+| `GitHub refused to post (403)` | The token needs *Pull requests: Read and write* on that repository. |
 | `Operation not permitted` in a terminal | That tab is in a folder that was moved or deleted. `cd` into the project again. |
 | No voice | Click the page once; use Chrome or Edge; check the voice toggle at the bottom. |
 
@@ -338,7 +344,7 @@ Reviews come from an AI and can be wrong: treat them as suggestions.
 | `DISPATCH_POLL_SECONDS` | `60` | How often the dispatcher checks for candidates |
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL` | none, "George", `eleven_multilingual_v2` | Optional ElevenLabs voice; empty key uses the browser voice |
 | `GITHUB_TOKEN`, `GITHUB_REPO` | | Token and `owner/name` of the repository for the MR features |
-| `PR_POLL_SECONDS`, `PR_POST_COMMENTS`, `PR_MAX_DIFF_CHARS` | `120`, `true`, `60000` | How often to check, whether to comment on GitHub, diff size limit |
+| `PR_POLL_SECONDS`, `PR_MAX_DIFF_CHARS` | `120`, `60000` | How often to check the pull requests; diff size limit |
 | `CORS_ORIGINS`, `HISTORY_LIMIT` | | Allowed frontend origins; messages remembered per conversation |
 
 `.env` is read from `backend/` (or the project root) wherever you start the backend from.
@@ -354,7 +360,7 @@ settings in `.env`: putting `GMAIL_…` lines in `.env` has no effect.
 | `token.json` | Your Gmail sign-in | `python -m connectors.gmail auth --modify` |
 | `alert_filters.json` | Incident analysis rules | You, copied from `alert_filters.example.json` |
 | `data/candidates.jsonl` | Queue of candidate emails | Incident analysis |
-| `data/pr_summarizer_state.json`, `data/pr_reviewer_state.json` | Pull requests already handled, latest results | MR summarizer / reviewer |
+| `data/pr_summarizer_state.json`, `data/pr_reviewer_state.json` | Latest results, for follow-up questions (what's done is read from GitHub) | MR summarizer / reviewer |
 
 To keep one elsewhere, export an environment variable in the terminal **before** starting the backend,
 for example `export GMAIL_TOKEN_FILE=/secure/token.json`. The variables are `GMAIL_CREDENTIALS_FILE`,

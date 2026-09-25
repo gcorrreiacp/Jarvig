@@ -80,10 +80,11 @@ _ON_TEXT = {
                  "reports to analyzed, and everything else to discarded."),
     "dispatcher": ("Every {poll} seconds I'll upload new candidates to {target} as text files "
                    "and move them from candidates to dispatched."),
-    "summarizer": ("Every {poll} seconds I'll check {target} for new or updated pull requests and "
-                   "summarize their code changes{comment}."),
-    "reviewer": ("Every {poll} seconds I'll check {target} for new or updated pull requests and "
-                 "suggest corrections to their code{comment}."),
+    "summarizer": ("Every {poll} seconds I'll check the open pull requests of {target}: any without my summary "
+                   "gets a summary comment, and I update it when new commits arrive."),
+    "reviewer": ("Every {poll} seconds I'll check the open pull requests of {target}: any I haven't reviewed gets "
+                 "comments on the lines that need changing, or a review saying no problems were found. "
+                 "New commits get a review of just the new changes."),
 }
 _PHRASE = {"analysis": "incident analysis", "dispatcher": "incident dispatcher",
            "summarizer": "MR summarizer", "reviewer": "MR reviewer"}
@@ -126,9 +127,7 @@ async def enable(service: PollingService) -> str:
     except RuntimeError as exc:
         return f"I couldn't start {_PHRASE[service.key]}: {exc}"
     status = service.status()
-    comment = " and post it on GitHub" if getattr(service.job, "post_comments", False) else ""
-    reply = f"{service.title} is on. " + _ON_TEXT[service.key].format(
-        poll=status["poll_seconds"], target=_target(service), comment=comment)
+    reply = f"{service.title} is on. " + _ON_TEXT[service.key].format(poll=status["poll_seconds"], target=_target(service))
     reply += f" Say \"turn off {_PHRASE[service.key]}\" to stop."
     if status["dry_run"]:
         reply += " Note: dry run is on in alert_filters.json, so I'm only logging, not moving emails."
@@ -171,6 +170,6 @@ def _totals_sentence(service: PollingService) -> str:
         if service.key in _HANDLED:
             return "No new pull requests so far."
         return "Nothing new so far." if service.key == "dispatcher" else "No new alerts sorted yet."
-    names = {**_COUNT_NAMES, "handled": _HANDLED.get(service.key, "handled"), "commented": "posted on GitHub"}
+    names = {**_COUNT_NAMES, "handled": _HANDLED.get(service.key, "handled")}
     parts = [f"{count} {names.get(name, name)}" for name, count in totals.items() if count]
     return "So far: " + ", ".join(parts) + "."
