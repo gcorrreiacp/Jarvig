@@ -50,7 +50,14 @@ export default function App() {
       </header>
 
       <main className="hud__main">
-        <Telemetry status={bridge.status} meta={bridge.meta} metrics={bridge.metrics} onReset={bridge.reset} />
+        <Telemetry
+          status={bridge.status}
+          meta={bridge.meta}
+          metrics={bridge.metrics}
+          incidents={bridge.incidents}
+          onReset={bridge.reset}
+          onToggleIncidents={bridge.toggleIncidents}
+        />
         <div className="hud__center">
           <Core state={state} name={name} />
         </div>

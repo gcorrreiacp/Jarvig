@@ -13,10 +13,13 @@ ENV_FILES = (BACKEND_DIR.parent / ".env", BACKEND_DIR / ".env")
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILES, extra="ignore")
 
-    assistant_name: str = "AURA"
+    assistant_name: str = "J.A.R.V.I.G."
     system_prompt: str = (
-        "You are AURA, a calm, precise, slightly witty personal assistant. "
-        "Keep spoken answers short unless asked for detail."
+        "You are J.A.R.V.I.G., a calm, precise, slightly witty personal assistant. "
+        "Keep spoken answers short unless asked for detail. Incident analysis (sorting the "
+        "user's Gmail alert emails) is switched on and off by the system when the user says "
+        "\"enable incident analysis\" or \"turn off incident analysis\"; tell them that if they ask."
+        " You have no tools: you can't read files, browse the web, send email or run code."
     )
 
     agent_provider: str = "echo"

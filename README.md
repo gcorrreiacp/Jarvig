@@ -97,3 +97,50 @@ It only asks for the `gmail.readonly` scope.
 From Python: `GmailConnector().search(query)` returns summaries, `.read(id)` returns an `Email`,
 and `.read_thread(id)` returns every message in a conversation. `credentials.json` and `token.json`
 are gitignored; keep them private.
+
+## Gmail alert watcher
+
+`backend/connectors/gmail_watcher.py` listens to your inbox for alert emails and sorts each one:
+
+- **Candidate for analysis**: stays in the inbox, gets the `candidates` label, and is appended to
+  `backend/data/candidates.jsonl` (the hand-off for the analysis step).
+- **Not a candidate**: gets the `discarded` label and leaves the inbox, so it only appears under
+  **discarded** in Gmail's sidebar. Nothing is deleted.
+
+- **Own folder** (`folders` in the rules, e.g. `analyzed` for analysis reports): gets that label and
+  leaves the inbox. Folders are checked before any discard rule, so these emails are never discarded.
+
+Emails that don't match `watch_query` are never touched.
+
+1. Allow labelling and moving mail (one-time; replaces a read-only token):
+   `cd backend && python -m connectors.gmail auth --modify`
+2. `cp alert_filters.example.json alert_filters.json` and edit the rules:
+   - `watch_query`: which emails count as alerts (any Gmail search).
+   - `folders`: `[{"label": "analyzed", "if_any": [rules]}]`, checked first.
+   - `discard_if_any`: always discard when one of these rules matches.
+   - `candidate_if_any`: a candidate when one of these matches; everything else is discarded.
+   - Rule fields: `from`, `to`, `subject`, `body` (a word or list of words, case-insensitive),
+     `subject_regex`, `body_regex`, `has_attachment`. Every field in a rule must match.
+3. Check the decisions first. `dry_run` is `true` in the example, so nothing is changed:
+   ```bash
+   python -m connectors.gmail_watcher once
+   python -m connectors.gmail_watcher test <message_id>
+   ```
+4. Set `"dry_run": false`, then keep it listening (polls every `poll_seconds`):
+   ```bash
+   python -m connectors.gmail_watcher watch
+   ```
+
+## Incident analysis from the HUD
+
+When you open the HUD, J.A.R.V.I.G. greets you and asks whether to enable incident analysis. Answer
+"yes" (or "sure", "go ahead", "sim") and the bridge runs the Gmail alert watcher in the background;
+"no" keeps it off. At any time you can say or type:
+
+- "enable incident analysis" / "turn off incident analysis"
+- "is incident analysis running?" for the status and what has been sorted so far
+
+The **Systems** panel shows the state and counts, with an on/off button. These commands are handled by
+the bridge itself (`bridge/commands.py`), not the agent, so they work with every provider. Incident
+analysis always starts switched off when the bridge starts. `GET/POST /api/incidents` (`{"enabled": true}`)
+does the same from scripts.

@@ -221,6 +221,8 @@ button, input { font: inherit; color: inherit; }
 .btn--warn { color: var(--amber); }
 .btn--warn svg { fill: currentColor; }
 .btn--ghost { margin: 0 var(--s4) var(--s4); color: var(--ink-dim); font-size: 13px; }
+.btn--ghost.is-on { color: var(--accent); border-color: var(--accent); }
+.tele__error { margin: 0 var(--s4) var(--s3); color: var(--amber); font-size: 12px; line-height: 1.4; }
 .btn--mic {
   width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center;
   color: var(--accent); border: 1px solid var(--accent);
