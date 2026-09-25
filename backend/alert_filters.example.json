@@ -1,12 +1,13 @@
 {
-  "_help": "Copy to alert_filters.json and edit. Only emails matching watch_query are ever touched. Rule fields: from, to, subject, body (a word or list of words, case-insensitive, any word matches), subject_regex, body_regex, has_attachment. All fields in one rule must match. folders are checked first and move matching emails into their own label (never discarded). Set dry_run to false once the log shows the right decisions.",
+  "_help": "Copy to alert_filters.json and edit. Only emails matching watch_query are ever touched. Rule fields: from, to, subject, body (a word or list of words, case-insensitive, any word matches), subject_regex, body_regex, has_attachment. All fields in one rule must match. folders are checked first and move matching emails into their own label (never discarded). Set dry_run to false once the log shows the right decisions. A folder with collects_dispatched moves the dispatched email named in a report (file ending _<gmail id>.txt) from dispatched to that folder.",
   "watch_query": "in:inbox subject:(alert OR alarm OR warning OR critical OR incident)",
   "lookback": "1d",
   "poll_seconds": 60,
   "dry_run": true,
   "labels": {
     "candidate": "candidates",
-    "discarded": "discarded"
+    "discarded": "discarded",
+    "dispatched": "dispatched"
   },
   "folders": [
     {
@@ -15,7 +16,8 @@
         {
           "subject": "alert report"
         }
-      ]
+      ],
+      "collects_dispatched": true
     }
   ],
   "discard_if_any": [

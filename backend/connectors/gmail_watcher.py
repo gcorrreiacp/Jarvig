@@ -12,6 +12,11 @@ Candidates stay in the inbox, get the "candidates" label and are appended to
 data/candidates.jsonl for the analysis step. Folder and discarded emails get their
 label and leave the inbox, which is how Gmail moves a message into a folder.
 
+The incident dispatcher later moves candidates to "dispatched". A folder with
+"collects_dispatched": true ("analyzed") also takes in the original: when a report
+names a dispatched file (…_<gmail id>.txt), that email moves from "dispatched" to the
+same folder and is counted there.
+
 Setup:
     python -m connectors.gmail auth --modify
     cp alert_filters.example.json alert_filters.json    # then edit the rules
@@ -46,6 +51,8 @@ FILTERS_FILE = _backend_path(os.getenv("GMAIL_FILTERS_FILE", "alert_filters.json
 CANDIDATES_FILE = _backend_path(os.getenv("GMAIL_CANDIDATES_FILE", "data/candidates.jsonl"))
 
 _TEXT_FIELDS = ("from", "to", "subject", "body")
+# Dispatched files end in the Gmail ID of their email: 20260925T110843Z_obj_1a0d952c13a4a043.txt
+_DISPATCHED_FILE = re.compile(r"_([0-9a-f]{12,20})\.txt\b")
 CANDIDATE, DISCARDED = "candidate", "discarded"
 _RATE_LIMIT_REASONS = {"rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded"}
 
@@ -70,6 +77,7 @@ class Filters:
     poll_seconds: int = 60
     candidate_label: str = "candidates"
     discarded_label: str = "discarded"
+    dispatched_label: str = "dispatched"
     dry_run: bool = False
     # [{"label": "analyzed", "if_any": [rule, ...]}]: checked before any discard rule.
     folders: list[dict] = field(default_factory=list)
@@ -90,6 +98,7 @@ class Filters:
             poll_seconds=int(raw.get("poll_seconds", 60)),
             candidate_label=labels.get("candidate", "candidates"),
             discarded_label=labels.get("discarded", "discarded"),
+            dispatched_label=labels.get("dispatched", "dispatched"),
             dry_run=bool(raw.get("dry_run", False)),
             folders=raw.get("folders", []),
         )
@@ -103,7 +112,13 @@ class Filters:
         return filters
 
     def labels(self) -> list[str]:
-        return [self.candidate_label, self.discarded_label] + [f["label"] for f in self.folders]
+        """Every label that means "already sorted". Dispatched emails have lost "candidates", so
+        without skipping "dispatched" they would be sorted, and dispatched, all over again."""
+        sorted_labels = [self.candidate_label, self.discarded_label, self.dispatched_label]
+        return sorted_labels + [f["label"] for f in self.folders]
+
+    def collects_dispatched(self, destination: str) -> bool:
+        return any(f["label"] == destination and f.get("collects_dispatched") for f in self.folders)
 
     def query(self) -> str:
         """New alert emails that have not been sorted yet."""
@@ -188,6 +203,10 @@ class AlertWatcher:
         # A dry run labels nothing, so the same emails keep matching; remember them instead.
         self._seen: set[str] = set()
 
+    @property
+    def poll_seconds(self) -> int:
+        return self.filters.poll_seconds
+
     def run_once(self) -> dict:
         """Sort every unsorted alert email once. Returns counts."""
         ids = [i for i in self.gmail.list_ids(self.filters.query()) if i not in self._seen]
@@ -212,9 +231,36 @@ class AlertWatcher:
                     self.gmail.relabel(message_ids, add=[self.gmail.label_id(label)], remove=["INBOX"])
 
         counts = {"checked": len(ids), **{d: len(items) for d, items in sorted_.items()}}
+        for destination, items in sorted_.items():
+            if self.filters.collects_dispatched(destination):
+                counts[destination] += sum(self._collect_dispatched(email, destination) for email, _ in items)
         if ids:
             log.info("%sSorted %s", "[dry run] " if self.dry_run else "", counts)
         return counts
+
+    def _collect_dispatched(self, report: Email, folder: str) -> int:
+        """Move the dispatched emails a report names from "dispatched" to `folder`. Returns how many."""
+        original_ids = dict.fromkeys(_DISPATCHED_FILE.findall(f"{report.subject}\n{report.body}"))
+        if not original_ids:
+            return 0
+        dispatched = self.gmail.find_label_id(self.filters.dispatched_label)
+        if not dispatched:
+            return 0
+        moved = 0
+        for original_id in original_ids:
+            try:
+                if dispatched not in self.gmail.label_ids_of(original_id):
+                    continue  # already moved, or never dispatched
+            except HttpError as exc:
+                if exc.resp.status == 404:  # the original email was deleted
+                    continue
+                raise
+            if not self.dry_run:
+                self.gmail.relabel([original_id], add=[self.gmail.label_id(folder)], remove=[dispatched, "INBOX"])
+            log.info("%s%-10s %s | moved from %s (report %s)", "[dry run] " if self.dry_run else "",
+                     folder.upper(), original_id, self.filters.dispatched_label, report.id)
+            moved += 1
+        return moved
 
     def watch(self, interval: int | None = None) -> None:
         interval = interval or self.filters.poll_seconds

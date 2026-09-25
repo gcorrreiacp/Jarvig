@@ -84,6 +84,7 @@ class Email:
     body: str
     html: str | None
     attachments: list[Attachment] = field(default_factory=list)
+    message_id: str = ""
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -176,19 +177,31 @@ class GmailConnector:
                 break
         return ids
 
-    def label_id(self, name: str) -> str:
-        """ID of the user label with this name, created if it does not exist. Needs the modify scope."""
+    def find_label_id(self, name: str) -> str | None:
+        """ID of the label with this name, or None if it doesn't exist (never creates one)."""
         if name in self._label_ids:
             return self._label_ids[name]
         for label in self.users.labels().list(userId="me").execute(num_retries=RETRIES).get("labels", []):
             if label["name"].lower() == name.lower():
                 self._label_ids[name] = label["id"]
                 return label["id"]
+        return None
+
+    def label_id(self, name: str) -> str:
+        """ID of the user label with this name, created if it does not exist. Needs the modify scope."""
+        found = self.find_label_id(name)
+        if found:
+            return found
         created = self.users.labels().create(
             userId="me", body={"name": name, "labelListVisibility": "labelShow", "messageListVisibility": "show"}
         ).execute(num_retries=RETRIES)
         self._label_ids[name] = created["id"]
         return created["id"]
+
+    def label_ids_of(self, message_id: str) -> list[str]:
+        """Label IDs currently on a message."""
+        msg = self.users.messages().get(userId="me", id=message_id, format="minimal").execute(num_retries=RETRIES)
+        return msg.get("labelIds", [])
 
     def relabel(self, message_ids: list[str], add: list[str] = (), remove: list[str] = ()) -> None:
         """Add/remove label IDs on many messages at once. Needs the modify scope."""
@@ -268,6 +281,7 @@ class GmailConnector:
             body=body.strip(),
             html=html,
             attachments=attachments,
+            message_id=str(parsed.get("Message-ID", "")),
         )
 
     def read_thread(self, thread_id: str) -> list[Email]:

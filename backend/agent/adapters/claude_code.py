@@ -52,7 +52,7 @@ class ClaudeCodeAgent(Agent):
         self.model = model or "default"
         self._model_arg = model
         # Run from an empty folder so no project CLAUDE.md or settings leak into replies.
-        self._workdir = tempfile.mkdtemp(prefix="aura-claude-")
+        self._workdir = tempfile.mkdtemp(prefix="jarvig-claude-")
 
     async def shutdown(self):
         shutil.rmtree(self._workdir, ignore_errors=True)
