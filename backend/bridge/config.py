@@ -42,7 +42,6 @@ class Settings(BaseSettings):
     github_token: str = ""
     github_repo: str = ""
     pr_poll_seconds: int = 120
-    pr_post_comments: bool = True
     pr_max_diff_chars: int = 60000
     webhook_url: str = ""
     webhook_token: str = ""
