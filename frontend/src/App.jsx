@@ -85,7 +85,10 @@ export default function App() {
           online={bridge.status === "online"}
           speech={speech}
           voiceReplies={voiceReplies}
-          setVoiceReplies={setVoiceReplies}
+          setVoiceReplies={(on) => {
+            setVoiceReplies(on);
+            if (!on) speech.stopSpeaking(); // cut the voice now, not after the current reply
+          }}
         />
       </footer>
     </div>
