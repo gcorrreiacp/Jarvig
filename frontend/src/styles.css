@@ -8,6 +8,7 @@
   --alert: #ff5f6d;         /* errors */
   --ink: #c9f1ff;
   --ink-dim: #6fa3b6;
+  --deep: #06303f;          /* glow rising from the bottom of the HUD */
 
   --accent: var(--holo);
   --line: color-mix(in srgb, var(--accent) 28%, transparent);
@@ -42,6 +43,41 @@ button, input { font: inherit; color: inherit; }
 .hud--listening { --accent: #8cf0ff; }
 .hud--offline { --accent: #5d7b88; }
 
+/* Beta skill in progress: the whole HUD goes violet ("lab mode"); working/offline keep their colours */
+.hud--beta {
+  --void: #0b0614;
+  --glass: #1f1036;
+  --holo: #b58cff;
+  --holo-hot: #f1e6ff;
+  --ink: #ece0ff;
+  --ink-dim: #a08cc7;
+  --deep: #2b1150;
+  --accent: var(--holo);
+}
+.hud--beta.hud--listening { --accent: #dcc4ff; }
+.hud--beta.hud--thinking { --accent: var(--amber); }
+.hud--beta.hud--offline { --accent: #6c5d88; }
+.hud, .panel, .brand { transition: background 600ms ease, color 600ms ease, border-color 600ms ease, text-shadow 600ms ease; }
+.beta-tag {
+  display: inline-block;
+  margin-left: var(--s3);
+  padding: 3px 10px;
+  border: 1px solid var(--accent);
+  font: 600 12px/1.4 var(--display);
+  letter-spacing: 0.18em;
+  vertical-align: middle;
+  color: var(--holo-hot);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  text-shadow: none;
+  animation: beta-pulse 2.4s ease-in-out infinite;
+}
+.beta-mini {
+  margin-left: 6px; padding: 0 5px;
+  border: 1px solid #b58cff; color: #d9c2ff;
+  font: 600 10px/1.5 var(--display); letter-spacing: 0.12em;
+}
+@keyframes beta-pulse { 50% { box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 60%, transparent); } }
+
 /* ============ Shell ============ */
 .hud {
   position: relative;
@@ -52,7 +88,7 @@ button, input { font: inherit; color: inherit; }
   padding: var(--s5) clamp(var(--s4), 3vw, var(--s6));
   background:
     radial-gradient(ellipse 60% 55% at 50% 45%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%),
-    radial-gradient(ellipse at 50% 120%, #06303f 0%, transparent 60%),
+    radial-gradient(ellipse at 50% 120%, var(--deep) 0%, transparent 60%),
     var(--void);
   transition: background 600ms ease;
   isolation: isolate;
@@ -90,6 +126,13 @@ button, input { font: inherit; color: inherit; }
   min-height: 0;
 }
 .hud__center { display: grid; place-items: center; min-height: 0; }
+.voice-hint {
+  margin-top: var(--s3); padding: 6px 14px; cursor: pointer;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid var(--line); color: var(--ink); font-size: 13px; letter-spacing: .04em;
+  animation: beta-pulse 2.4s ease-in-out infinite;
+}
+.voice-hint:hover { border-color: var(--accent); }
 
 /* ============ Panels ============ */
 .panel {
@@ -117,8 +160,17 @@ button, input { font: inherit; color: inherit; }
 .panel__head h2 { margin: 0; font: 500 14px/1 var(--display); letter-spacing: 0.14em; color: var(--accent); }
 
 /* ============ Telemetry ============ */
-.tele { align-self: start; }
-.tele__list { margin: 0; padding: var(--s2) var(--s4) var(--s4); }
+.tele { align-self: start; max-height: 100%; }
+.tele__body { overflow-y: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.tele__group {
+  margin: 0; padding: var(--s3) var(--s4) 0;
+  font: 500 11px/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-dim);
+}
+.tele__list { margin: 0; padding: var(--s1) var(--s4) var(--s3); }
+.tele__row.tele__row--service { grid-template-columns: 1fr auto auto; align-items: center; }
+.tele__row.tele__row--count { padding: 3px 0 3px var(--s3); border-bottom: 0; }
+.tele__row--count dt, .tele__row--count dd { font-size: 12px; }
+.toggle--compact { gap: 0; }
 .tele__row {
   display: grid; grid-template-columns: 1fr auto; align-items: baseline;
   gap: var(--s1) var(--s3);
@@ -182,6 +234,25 @@ button, input { font: inherit; color: inherit; }
 .line--user .line__text { color: color-mix(in srgb, var(--ink) 80%, var(--ink-dim)); }
 .line--interim .line__text { opacity: .55; font-style: italic; }
 .line--error .line__text { color: var(--alert); border-left-color: var(--alert); }
+
+/* Tables sent with a reply (e.g. the timesheet preview) */
+/* While a beta skill shows a table, give the conversation room so every column fits */
+.hud__main:has(.line--wide) { grid-template-columns: minmax(200px, 240px) minmax(0, 1fr) minmax(320px, 640px); }
+.line--wide { max-width: none; }
+.transcript, .line--wide, .datatable { min-width: 0; } /* narrow screens: the table scrolls, not the page */
+.datatable { margin: var(--s2) 0 0 var(--s3); }
+.datatable figcaption { color: var(--ink-dim); font-size: 12px; letter-spacing: .06em; margin-bottom: var(--s1); }
+.datatable__scroll { overflow-x: auto; max-height: 360px; overflow-y: auto; border: 1px solid var(--line); }
+.datatable table { border-collapse: collapse; font-size: 12px; white-space: nowrap; width: 100%; }
+.datatable th { position: sticky; top: 0; background: var(--glass); color: var(--ink-dim); font-weight: 500; text-align: left; }
+.datatable th, .datatable td { padding: 3px 8px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.datatable td:first-child { text-align: right; color: var(--ink-dim); }
+.datatable tr.row--weekend td { color: var(--ink-dim); background: color-mix(in srgb, #fff9c7 7%, transparent); }
+.datatable tr.row--holiday td { background: color-mix(in srgb, #ff5f8a 16%, transparent); }
+.datatable tr.row--special td { background: color-mix(in srgb, #5fd3a0 12%, transparent); }
+.datatable td:last-child { color: var(--ink-dim); font-style: italic; }
+.datatable tr.row--new td:last-child { color: var(--accent); font-style: normal; }
+.datatable tr.row--replace td:last-child { color: var(--amber); font-style: normal; }
 .line__note { font-size: 12px; color: var(--amber); }
 .caret { display: inline-block; width: .55em; height: 1em; margin-left: 2px; vertical-align: -2px; background: var(--accent); animation: blink .8s steps(2) infinite; }
 
@@ -214,7 +285,7 @@ button, input { font: inherit; color: inherit; }
 .btn--warn svg { fill: currentColor; }
 .btn--ghost { margin: 0 var(--s4) var(--s4); color: var(--ink-dim); font-size: 13px; }
 .btn--ghost.is-on { color: var(--accent); border-color: var(--accent); }
-.tele__error { margin: 0 var(--s4) var(--s3); color: var(--amber); font-size: 12px; line-height: 1.4; }
+.tele__error { margin: var(--s1) 0 var(--s2); color: var(--amber); font-size: 12px; line-height: 1.4; }
 .btn--mic {
   width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center;
   color: var(--accent); border: 1px solid var(--accent);
@@ -252,8 +323,10 @@ button, input { font: inherit; color: inherit; }
 @media (max-width: 1100px) {
   .hud__main { grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); }
   .tele { display: none; }
+  .hud__main:has(.line--wide) { grid-template-columns: minmax(0, 1fr) minmax(320px, 600px); }
 }
 @media (max-width: 760px) {
+  .hud__main:has(.line--wide) { grid-template-columns: minmax(0, 1fr); }
   body { overflow: auto; }
   .hud { height: auto; min-height: 100%; padding: var(--s4); }
   .hud__main { grid-template-columns: 1fr; }

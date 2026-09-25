@@ -6,9 +6,11 @@ with every agent provider, and can't be misread.
 """
 from __future__ import annotations
 
+import random
 import re
 from datetime import datetime
 
+from . import features
 from .services import PollingService
 
 # Which services a phrase names. "incident" alone means analysis, but not in "incident dispatcher".
@@ -31,20 +33,14 @@ _ACTIONS = {                                                      # checked in t
 # "start the dispatcher and incident analysis" -> two clauses; a clause with no verb reuses the last one.
 _CLAUSES = re.compile(r",|;|\band\b|\bbut\b|\bthen\b|\balso\b", re.I)
 _NEGATED = re.compile(r"^\s*(don'?t|do not|never)\b", re.I)
-_YES = re.compile(
-    r"^\s*(yes|yeah|yep|yup|sure|ok(ay)?|please|go ahead|do it|affirmative|absolutely|of course|"
-    r"enable( it)?|turn it on|switch it on|start( it)?|sim|claro|ja)\b", re.I)
-_NO = re.compile(r"^\s*(no|nope|nah|not now|not yet|later|no thanks|n[aã]o|nein)\b", re.I)
 _ORDER = ("analysis", "dispatcher", "summarizer", "reviewer")
+# "which features are in beta?", "what's still in beta", "list the beta features"
+_BETA_QUESTION = re.compile(r"\b(which|what|list|show|any)\b.*\bbeta\b|\bbeta\b.*\b(features?|skills?)\b.*\?", re.I)
 
 
-def parse(text: str, offer_pending: bool = False) -> tuple[list[tuple[str, str]], bool]:
-    """(actions, declined): e.g. ([("enable", "dispatcher"), ("enable", "analysis")], False).
-
-    `declined` is True when the text answers the greeting's offer with no.
-    """
+def parse(text: str) -> list[tuple[str, str]]:
+    """The actions a sentence asks for, e.g. [("enable", "dispatcher"), ("enable", "analysis")]."""
     actions: list[tuple[str, str]] = []
-    declined = False
     verb = None
     for clause in (c.strip() for c in _CLAUSES.split(text)):
         if not clause:
@@ -57,21 +53,15 @@ def parse(text: str, offer_pending: bool = False) -> tuple[list[tuple[str, str]]
         elif not targets and _BOTH.search(clause):
             targets = ["analysis", "dispatcher"]
         if _NEGATED.search(clause):
-            declined = declined or (offer_pending and not targets)
             verb = None
             continue
         clause_verb = next((name for name, pattern in _ACTIONS.items() if pattern.search(clause)), None)
         verb = clause_verb or verb
         if not targets:
-            # A bare "yes" / "no" (or "enable it") answers the greeting's question about incident analysis.
-            if offer_pending and _NO.search(clause):
-                declined = True
-            elif offer_pending and _YES.search(clause):
-                actions.append(("enable", "analysis"))
             continue
         if verb:
             actions += [(verb, key) for key in targets]
-    return list(dict.fromkeys(actions)), declined and not actions
+    return list(dict.fromkeys(actions))
 
 
 # What each service does, for its replies.
@@ -92,24 +82,64 @@ _HANDLED = {"summarizer": "summarized", "reviewer": "reviewed"}
 _COUNT_NAMES = {"candidate": "candidates", "tidied": "already-dispatched removed from candidates"}
 
 
-def greeting(name: str, analysis: PollingService) -> tuple[str, bool]:
-    """(text, is_asking): the HUD's opening line and whether it offers incident analysis."""
-    end = "" if name.endswith(".") else "."  # "J.A.R.V.I.G." already ends a sentence
-    if analysis.enabled:
-        return f"Welcome back. {name} online. Incident analysis is running.".replace("..", "."), False
-    return (
-        f"Hello, I'm {name}{end} Would you like me to enable incident analysis? "
-        "I'll watch your Gmail for alerts: production errors are queued for analysis, "
-        "reports go to analyzed, and the rest is discarded.",
-        True,
-    )
+# ---- Private mode / standard mode (which AI answers)
+_M_OFF = re.compile(
+    r"\b(disable|turn off|switch off|exit|leave|stop|end|deactivate|quit)\b[^.?!]*\bprivate( mode)?\b"
+    r"|\b(switch|go|change|move|back|return|get back)\b[^.?!]*\b(standard( mode)?|claude|the cloud|cloud mode)\b"
+    r"|^\s*(standard mode|back to claude)\s*[.!]*\s*$", re.I)
+_M_ON = re.compile(
+    r"\b(switch|go|change|move|turn on|enable|activate|start|enter)\b[^.?!]*\b(private( mode)?|local( model| mode)?)\b"
+    r"|^\s*(private mode|go private|go local)( on| please)?\s*[.!]*\s*$", re.I)
+_M_STATUS = re.compile(
+    r"\b(are you|am i|are we)\b[^.?!]*\b(in )?(private|standard) mode\b"
+    r"|\b(which|what)\b[^.?!]*\b(model|brain|llm|ai)\b[^.?!]*\b(are you|am i|is (this|it)|using|running)\b", re.I)
 
 
-async def handle(text: str, services: dict[str, PollingService], offer_pending: bool) -> str | None:
+def parse_mode(text: str) -> str | None:
+    """"private", "standard", "status", or None when the text isn't about the mode."""
+    if _NEGATED.search(text):
+        return None
+    if _M_OFF.search(text):
+        return "standard"
+    if _M_ON.search(text):
+        return "private"
+    if _M_STATUS.search(text):
+        return "status"
+    return None
+
+
+# Opening lines for a new conversation: a welcome and an invitation, never a feature pitch.
+# "{name}" is the assistant's name and "{part}" the time of day.
+GREETINGS = [
+    "Good {part}. What would you like to do?",
+    "Hello. What can I do for you today?",
+    "{name} online. What would you like to know?",
+    "Good {part}. Where shall we start?",
+    "At your service. What's on your mind?",
+    "Hello again. What would you like to work on?",
+    "Ready when you are. What do you need?",
+    "Good {part}. Is there anything you'd like to know, or shall we get to work?",
+    "Systems are up. How can I help?",
+    "Welcome back. What would you like to do first?",
+]
+_last_greeting: str | None = None
+
+
+def greeting(name: str, now: datetime | None = None) -> str:
+    """A random welcome for the HUD's first line, different from the previous one."""
+    global _last_greeting
+    hour = (now or datetime.now()).hour
+    part = "morning" if 5 <= hour < 12 else "afternoon" if 12 <= hour < 18 else "evening"
+    options = [g for g in GREETINGS if g != _last_greeting] or GREETINGS
+    _last_greeting = random.choice(options)
+    return _last_greeting.format(name=name, part=part)
+
+
+async def handle(text: str, services: dict[str, PollingService]) -> str | None:
     """The reply if `text` is a built-in command, else None (the agent answers)."""
-    actions, declined = parse(text, offer_pending)
-    if declined:
-        return "Understood, incident analysis stays off. Just say \"enable incident analysis\" if you change your mind."
+    if _BETA_QUESTION.search(text):
+        return describe_beta()
+    actions = parse(text)
     if not actions:
         return None
     run = {"enable": enable, "disable": disable}
@@ -154,6 +184,25 @@ def describe(service: PollingService) -> str:
     if status["last_error"]:
         text += f" Last problem: {status['last_error']}"
     return text
+
+
+def describe_beta() -> str:
+    """Which features are in beta, and what has to be true before each one leaves it."""
+    try:
+        beta = features.in_beta()
+    except (OSError, ValueError) as exc:
+        return f"I couldn't read the feature list: {exc}"
+    if not beta:
+        return "No features are in beta: everything is stable."
+    parts = []
+    for f in beta:
+        since = f" since {datetime.fromisoformat(f.since):%-d %B}" if f.since else ""
+        part = f"{f.title} ({f.kind}{since})"
+        if f.ready_when:
+            part += f". It's ready when: {f.ready_when.rstrip('.')}"
+        parts.append(part)
+    return f"{len(beta)} feature{'s are' if len(beta) != 1 else ' is'} in beta: " + "; ".join(parts) + \
+        ". Everything else is stable."
 
 
 def _target(service: PollingService) -> str:

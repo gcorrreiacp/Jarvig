@@ -55,54 +55,71 @@ const SERVICES = [
   },
 ];
 
-function ServiceRows({ def, service }) {
+/** One feature: name, state and its own on/off switch; its counts and last problem while relevant. */
+function ServiceRows({ def, service, online, onToggle }) {
   const totals = service.totals ?? {};
   return (
     <>
-      <Row label={def.label} value={stateText(service)} />
-      {service.enabled && def.counts.map(([key, label]) => <Row key={key} label={label} value={totals[key] ?? 0} />)}
+      <div className="tele__row tele__row--service">
+        <dt>
+          {def.label}
+          {service.beta && <span className="beta-mini" title="In beta (backend/features.json)">BETA</span>}
+        </dt>
+        <dd><span className="tele__value">{stateText(service)}</span></dd>
+        <label className="toggle toggle--compact" title={service.enabled ? `Turn off ${def.name}` : `Enable ${def.name}`}>
+          <input
+            type="checkbox"
+            role="switch"
+            checked={service.enabled}
+            disabled={!online}
+            onChange={(e) => onToggle(def.key, e.target.checked)}
+            aria-label={def.name}
+          />
+          <span className="toggle__track" aria-hidden="true" />
+        </label>
+      </div>
+      {service.enabled && def.counts.map(([key, label]) => (
+        <div className="tele__row tele__row--count" key={key}>
+          <dt>{label}</dt>
+          <dd><span className="tele__value">{totals[key] ?? 0}</span></dd>
+        </div>
+      ))}
+      {service.last_error && <p className="tele__error" role="status">{service.last_error}</p>}
     </>
   );
 }
 
 export default function Telemetry({ status, meta, metrics, services, onReset, onToggleService }) {
   const agent = meta.agent;
+  const online = status === "online";
   return (
     <aside className="panel tele" aria-label="System status">
       <header className="panel__head">
         <h2>Systems</h2>
         <span className={`dot dot--${status}`} aria-hidden="true" />
       </header>
-      <dl className="tele__list">
-        <Row label="Bridge" value={LINK_TEXT[status]} />
-        <Row label="Agent" value={agent?.provider} />
-        <Row label="Model" value={agent?.model} />
-        <Row label="Round trip" value={metrics.rtt} unit="ms" gauge={<Gauge value={metrics.rtt} max={300} />} />
-        <Row label="First token" value={metrics.firstToken} unit="ms" gauge={<Gauge value={metrics.firstToken} max={3000} />} />
-        <Row label="Full reply" value={metrics.total} unit="ms" gauge={<Gauge value={metrics.total} max={12000} />} />
-        <Row label="Turns" value={metrics.turns} />
-        {SERVICES.map((def) => <ServiceRows key={def.key} def={def} service={services[def.key]} />)}
-      </dl>
-      {SERVICES.map(({ key }) => services[key].last_error && (
-        <p key={key} className="tele__error" role="status">{services[key].last_error}</p>
-      ))}
-      {SERVICES.map((def) => {
-        const on = services[def.key].enabled;
-        return (
-          <button
-            key={def.key}
-            className={`btn btn--ghost${on ? " is-on" : ""}`}
-            onClick={() => onToggleService(def.key, !on)}
-            disabled={status !== "online"}
-            aria-pressed={on}
-          >
-            {on ? `Turn off ${def.name}` : `Enable ${def.name}`}
-          </button>
-        );
-      })}
-      <button className="btn btn--ghost" onClick={onReset} disabled={status !== "online"}>
-        Clear memory
-      </button>
+      {/* Scrolls inside the panel, so a long list never pushes controls off the screen */}
+      <div className="tele__body">
+        <h3 className="tele__group">Link</h3>
+        <dl className="tele__list">
+          <Row label="Bridge" value={LINK_TEXT[status]} />
+          <Row label="Agent" value={agent?.provider} />
+          <Row label="Model" value={agent?.model} />
+          <Row label="Round trip" value={metrics.rtt} unit="ms" gauge={<Gauge value={metrics.rtt} max={300} />} />
+          <Row label="First token" value={metrics.firstToken} unit="ms" gauge={<Gauge value={metrics.firstToken} max={3000} />} />
+          <Row label="Full reply" value={metrics.total} unit="ms" gauge={<Gauge value={metrics.total} max={12000} />} />
+          <Row label="Turns" value={metrics.turns} />
+        </dl>
+        <h3 className="tele__group">Features</h3>
+        <dl className="tele__list">
+          {SERVICES.map((def) => (
+            <ServiceRows key={def.key} def={def} service={services[def.key]} online={online} onToggle={onToggleService} />
+          ))}
+        </dl>
+        <button className="btn btn--ghost" onClick={onReset} disabled={!online}>
+          Clear memory
+        </button>
+      </div>
     </aside>
   );
 }

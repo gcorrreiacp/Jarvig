@@ -1,0 +1,41 @@
+{
+  "_help": "Every J.A.R.V.I.G. feature and whether it is in beta. status is \"beta\" or \"stable\". A beta skill turns the HUD violet and starts its replies with \"You've requested a BETA Feature.\"; a beta service gets a BETA tag in the Systems panel; a beta mode (private mode) keeps the HUD violet while it is on and says the BETA line once, when switching. To take a feature out of beta, set its status to \"stable\" once its ready_when condition is met. Changes apply without a restart.",
+  "incident_analysis": {
+    "title": "Incident analysis",
+    "kind": "service",
+    "status": "stable",
+    "since": "2026-09-25"
+  },
+  "incident_dispatcher": {
+    "title": "Incident dispatcher",
+    "kind": "service",
+    "status": "stable",
+    "since": "2026-09-25"
+  },
+  "mr_summarizer": {
+    "title": "MR summarizer",
+    "kind": "service",
+    "status": "stable",
+    "since": "2026-09-25"
+  },
+  "mr_reviewer": {
+    "title": "MR reviewer",
+    "kind": "service",
+    "status": "stable",
+    "since": "2026-09-25"
+  },
+  "timesheet": {
+    "title": "Timesheet",
+    "kind": "skill",
+    "status": "beta",
+    "since": "2026-09-26",
+    "ready_when": "It has filled two real months of the timesheet correctly without manual fixes."
+  },
+  "private_mode": {
+    "title": "Private mode",
+    "kind": "mode",
+    "status": "beta",
+    "since": "2026-09-26",
+    "ready_when": "Used for a full working week without needing to switch back to Claude for quality."
+  }
+}

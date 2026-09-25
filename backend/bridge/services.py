@@ -23,9 +23,11 @@ class StopService(Exception):
 
 
 class PollingService:
-    def __init__(self, key: str, title: str, build: Callable[[], Any], fatal: tuple[type[Exception], ...] = ()):
+    def __init__(self, key: str, title: str, build: Callable[[], Any], fatal: tuple[type[Exception], ...] = (),
+                 feature: str = ""):
         self.key = key          # "analysis" | "dispatcher", used in the protocol
         self.title = title      # "Incident analysis", used in replies
+        self.feature = feature  # its key in backend/features.json, for the beta status
         self._build = build
         self._fatal = (StopService, *fatal)  # errors that stop the service instead of retrying
         self._task: asyncio.Task | None = None
@@ -45,8 +47,10 @@ class PollingService:
         return self._job
 
     def status(self) -> dict:
+        from .features import is_beta
         return {
             "service": self.key,
+            "beta": is_beta(self.feature),
             "enabled": self.enabled,
             "dry_run": bool(self._job and self._job.dry_run),
             "poll_seconds": self._job.poll_seconds if self._job else None,

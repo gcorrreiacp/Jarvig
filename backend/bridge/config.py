@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     github_repo: str = ""
     pr_poll_seconds: int = 120
     pr_max_diff_chars: int = 60000
+    # Timesheet skill (beta): the Excel file it fills in. "~" is allowed; a backup is made before each save.
+    # Private mode (beta): a model on this Mac through an OpenAI-compatible server, switched by voice.
+    local_base_url: str = "http://localhost:11434/v1"   # Ollama; LM Studio is http://localhost:1234/v1
+    local_model: str = "llama3.1"
+    local_api_key: str = "ollama"
+    timesheet_path: str = ""
+    timesheet_lunch: str = "12:00-13:00"     # splits "8 to 17" into morning and afternoon
+    timesheet_location: str = "Portugal"     # used when you don't say where you worked
     webhook_url: str = ""
     webhook_token: str = ""
     custom_agent: str = "agent.examples.my_agent:MyAgent"

@@ -50,10 +50,13 @@ export default function App() {
   const name = bridge.meta.assistant;
 
   return (
-    <div className={`hud hud--${state}`}>
+    <div className={`hud hud--${state}${bridge.beta ? " hud--beta" : ""}`}>
       <div className="hud__grid" aria-hidden="true" />
       <header className="hud__top">
-        <h1 className="brand">{name}</h1>
+        <h1 className="brand">
+          {name}
+          {bridge.beta && <span className="beta-tag">BETA · {bridge.beta}</span>}
+        </h1>
         <Clock />
       </header>
 
@@ -67,7 +70,17 @@ export default function App() {
           onToggleService={bridge.toggleService}
         />
         <div className="hud__center">
-          <Core ref={auraRef} state={state} name={name} ttsUrl={bridge.meta.tts ? apiUrl("/api/tts") : null} />
+          <Core
+            ref={auraRef}
+            state={state}
+            name={name}
+            beta={Boolean(bridge.beta)}
+            ttsUrl={bridge.meta.tts ? apiUrl("/api/tts") : null}
+          />
+          {speech.waitingForGesture && voiceReplies && (
+            // Browsers only allow speech after a click or key press; any click on the page plays it.
+            <button className="voice-hint" type="button">🔊 Click to hear {name}</button>
+          )}
         </div>
         <Transcript
           messages={bridge.messages}
