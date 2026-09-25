@@ -74,11 +74,13 @@ export function useSpeech({ onFinal, voice } = {}) {
     if (!voice?.current || !text) return;
     if (!hasUserActivation()) {
       // e.g. the greeting on page load: say it on the first interaction instead of losing it.
+      const queued = turn.current;
       const later = (e) => {
         window.removeEventListener("pointerdown", later);
         window.removeEventListener("keydown", later);
-        // Not when that first key press is push-to-talk: the mic would hear the greeting.
-        if (!(e.ctrlKey && e.code === "Space")) speakRef.current?.(text);
+        // Not when that first key press is push-to-talk (the mic would hear the greeting),
+        // and not if speech was stopped meanwhile (e.g. "Read replies aloud" switched off).
+        if (!(e.ctrlKey && e.code === "Space") && turn.current === queued) speakRef.current?.(text);
       };
       window.addEventListener("pointerdown", later, { once: true });
       window.addEventListener("keydown", later, { once: true });
