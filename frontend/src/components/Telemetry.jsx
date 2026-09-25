@@ -41,6 +41,18 @@ const SERVICES = [
     name: "incident dispatcher",
     counts: [["dispatched", "Dispatched"], ["failed", "Failed"]],
   },
+  {
+    key: "summarizer",
+    label: "MR summarizer",
+    name: "MR summarizer",
+    counts: [["handled", "Summarized"]],
+  },
+  {
+    key: "reviewer",
+    label: "MR reviewer",
+    name: "MR reviewer",
+    counts: [["handled", "Reviewed"]],
+  },
 ];
 
 function ServiceRows({ def, service }) {

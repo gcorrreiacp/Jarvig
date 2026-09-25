@@ -6,13 +6,13 @@ WebSocket protocol (/ws?session=<id>):
     {"type": "cancel"}                 stop the reply in progress
     {"type": "reset"}                  clear this session's history
     {"type": "ping", "t": <ms>}        latency probe
-    {"type": "toggle", "service": "analysis" | "dispatcher", "enabled": bool}
+    {"type": "toggle", "service": "analysis" | "dispatcher" | "summarizer" | "reviewer", "enabled": bool}
   server -> client
     {"type": "hello", assistant, agent, session_id, turns, tts}
     {"type": "service", service, enabled, dry_run, poll_seconds, last_run, last_error, totals}
     {"type": "start", id}
     {"type": "token", id, text}
-    {"type": "done", id, text, first_token_ms, total_ms, turns}
+    {"type": "done", id, text, first_token_ms, total_ms, turns}   (+ "speak", "local" on bridge-written replies)
     {"type": "cancelled", id} | {"type": "error", id, message}
     {"type": "pong", t} | {"type": "reset_ok"}
 """
@@ -57,14 +57,57 @@ def _dispatch_errors() -> tuple[type[Exception], ...]:
     return (DispatchError,)
 
 
+def _complete(prompt: str, system: str) -> str:
+    """Ask the agent from a service's worker thread (the agent lives on the bridge's event loop)."""
+    agent = app.state.agent
+    return asyncio.run_coroutine_threadsafe(agent.complete([Message("user", prompt)], system), _loop).result(timeout=900)
+
+
+def _pr_builder(mode: str):
+    def build():
+        from connectors.github_prs import build_from_settings
+        info = app.state.agent.info()
+        return build_from_settings(mode, settings, _complete, agent_name=f"{info['provider']}/{info['model']}")
+    return build
+
+
+def _pr_errors() -> tuple[type[Exception], ...]:
+    from connectors.github_prs import PullRequestError
+    return (PullRequestError,)
+
+
+def system_prompt() -> str:
+    """The configured prompt plus the latest pull request summaries/reviews, so the user can ask about them."""
+    context = []
+    try:
+        from connectors.github_prs import PullRequestJob
+        for mode in ("summarizer", "reviewer"):
+            job = PullRequestJob(mode, github=None, complete=None)  # only reads its saved state
+            context += [r.as_context() for r in job.recent(2)]
+    except Exception:
+        # Extra context is optional: never let it stop a normal chat reply.
+        log.exception("Couldn't load recent pull request results for the prompt")
+    if not context:
+        return settings.system_prompt
+    return (settings.system_prompt + "\n\nRecent pull request summaries and reviews you produced "
+            "(use them if the user asks about pull requests):\n\n" + "\n\n".join(context))
+
+
 services = {
     "analysis": PollingService("analysis", "Incident analysis", _build_watcher),
     "dispatcher": PollingService("dispatcher", "Incident dispatcher", _build_dispatcher, fatal=_dispatch_errors()),
+    "summarizer": PollingService("summarizer", "MR summarizer", _pr_builder("summarizer"), fatal=_pr_errors()),
+    "reviewer": PollingService("reviewer", "MR reviewer", _pr_builder("reviewer"), fatal=_pr_errors()),
 }
+
+
+_loop: asyncio.AbstractEventLoop | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _loop
+    _loop = asyncio.get_running_loop()
     agent = build_agent(settings)
     await agent.startup()
     app.state.agent = agent
@@ -110,7 +153,7 @@ async def chat(req: ChatRequest):
     """Non-streaming endpoint for scripts, shortcuts, home automation, etc."""
     sessions.append(req.session_id, Message("user", req.text))
     try:
-        reply = await agent_of(app).complete(sessions.history(req.session_id), settings.system_prompt)
+        reply = await agent_of(app).complete(sessions.history(req.session_id), system_prompt())
     except AgentError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     sessions.append(req.session_id, Message("assistant", reply))
@@ -187,12 +230,14 @@ async def safe_send(ws: WebSocket, payload: dict) -> None:
         await ws.send_json(payload)
 
 
-async def say(ws: WebSocket, session_id: str, text: str) -> None:
-    """Send a reply the bridge wrote itself, shaped like an agent turn so the HUD shows and speaks it."""
+async def say(ws: WebSocket, session_id: str, text: str, speak: str | None = None) -> None:
+    """Send a reply the bridge wrote itself, shaped like an agent turn so the HUD shows and speaks it.
+    `speak` is read aloud instead of `text` when the full text is too long to listen to."""
     turn_id = uuid.uuid4().hex[:12]
     await safe_send(ws, {"type": "start", "id": turn_id})
     await safe_send(ws, {"type": "token", "id": turn_id, "text": text})
-    await safe_send(ws, {"type": "done", "id": turn_id, "text": text, "turns": sessions.turns(session_id), "local": True})
+    await safe_send(ws, {"type": "done", "id": turn_id, "text": text, "speak": speak or text,
+                         "turns": sessions.turns(session_id), "local": True})
 
 
 async def toggle_service(ws: WebSocket, session_id: str, key: str, enabled: bool) -> None:
@@ -217,7 +262,7 @@ async def run_turn(ws: WebSocket, session_id: str, text: str, offer_pending: boo
     first_token_ms: int | None = None
     parts: list[str] = []
     try:
-        async for chunk in agent.stream(sessions.history(session_id), settings.system_prompt):
+        async for chunk in agent.stream(sessions.history(session_id), system_prompt()):
             if not chunk:
                 continue
             if first_token_ms is None:
@@ -263,6 +308,9 @@ async def ws_endpoint(ws: WebSocket):
     })
     unsubscribers = [
         service.subscribe(lambda status: ws.send_json({"type": "service", **status}))
+        for service in services.values()
+    ] + [
+        service.on_announce(lambda item: say(ws, session_id, item["text"], item.get("speak")))
         for service in services.values()
     ]
     for service in services.values():

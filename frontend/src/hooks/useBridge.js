@@ -35,6 +35,8 @@ export function useBridge({ onReply } = {}) {
   const [services, setServices] = useState({
     analysis: { enabled: false, totals: {} },
     dispatcher: { enabled: false, totals: {} },
+    summarizer: { enabled: false, totals: {} },
+    reviewer: { enabled: false, totals: {} },
   });
   const [messages, setMessages] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -96,7 +98,7 @@ export function useBridge({ onReply } = {}) {
             setMetrics((m) => (msg.local
               ? { ...m, turns: msg.turns }
               : { ...m, firstToken: msg.first_token_ms, total: msg.total_ms, turns: msg.turns }));
-            onReplyRef.current?.(msg.text);
+            onReplyRef.current?.(msg.speak ?? msg.text); // long announcements come with a short spoken version
             break;
           case "cancelled":
             setBusy(false);
