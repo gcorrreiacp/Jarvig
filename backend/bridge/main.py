@@ -8,7 +8,7 @@ WebSocket protocol (/ws?session=<id>):
     {"type": "ping", "t": <ms>}        latency probe
     {"type": "toggle", "service": "analysis" | "dispatcher", "enabled": bool}
   server -> client
-    {"type": "hello", assistant, agent, session_id, turns}
+    {"type": "hello", assistant, agent, session_id, turns, tts}
     {"type": "service", service, enabled, dry_run, poll_seconds, last_run, last_error, totals}
     {"type": "start", id}
     {"type": "token", id, text}
@@ -24,7 +24,8 @@ import time
 import uuid
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+import httpx
+from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -145,6 +146,35 @@ async def dispatcher_toggle(req: ServiceToggle):
     return {"reply": await _toggle("dispatcher", req.enabled), **services["dispatcher"].status()}
 
 
+class TTSRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+
+
+@app.post("/api/tts")
+async def tts(req: TTSRequest):
+    """Speech for the assistant's voice: POST {text} -> audio/mpeg. Keeps the ElevenLabs key off the browser."""
+    if not settings.elevenlabs_api_key:
+        raise HTTPException(status_code=404, detail="TTS is not configured (set ELEVENLABS_API_KEY)")
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{settings.elevenlabs_voice_id}"
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            res = await client.post(
+                url,
+                params={"output_format": "mp3_44100_128"},
+                headers={"xi-api-key": settings.elevenlabs_api_key, "Accept": "audio/mpeg"},
+                json={
+                    "text": req.text,
+                    "model_id": settings.elevenlabs_model,
+                    "voice_settings": {"stability": 0.6, "similarity_boost": 0.8, "style": 0.2},
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"TTS unreachable: {exc}")
+    if res.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"TTS failed ({res.status_code}): {res.text[:200]}")
+    return Response(content=res.content, media_type="audio/mpeg")
+
+
 @app.post("/api/sessions/{session_id}/reset")
 async def reset(session_id: str):
     sessions.reset(session_id)
@@ -229,6 +259,7 @@ async def ws_endpoint(ws: WebSocket):
         "agent": agent_of(ws.app).info(),
         "session_id": session_id,
         "turns": sessions.turns(session_id),
+        "tts": bool(settings.elevenlabs_api_key),
     })
     unsubscribers = [
         service.subscribe(lambda status: ws.send_json({"type": "service", **status}))

@@ -2,7 +2,9 @@ import { useEffect, useRef } from "react";
 
 export default function Transcript({ messages, interim, name, speechSupported }) {
   const endRef = useRef(null);
-  useEffect(() => endRef.current?.scrollIntoView({ block: "end" }), [messages, interim]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [messages, interim]);
 
   return (
     <section className="panel transcript" aria-label="Conversation">
