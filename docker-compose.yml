@@ -1,0 +1,14 @@
+services:
+  bridge:
+    build: ./backend
+    env_file: ./backend/.env
+    ports: ["8000:8000"]
+    restart: unless-stopped
+    # Using Ollama on the host? set OPENAI_BASE_URL=http://host.docker.internal:11434/v1
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  hud:
+    build: ./frontend
+    ports: ["8080:80"]
+    depends_on: [bridge]
+    restart: unless-stopped

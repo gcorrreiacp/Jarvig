@@ -1,0 +1,32 @@
+# ---- Secrets: never commit ----
+.env
+.env.*
+!.env.example
+env.
+# Gmail OAuth client and the user's sign-in token
+credentials.json
+token.json
+client_secret*.json
+
+# ---- Python ----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# ---- Frontend (Node / Vite) ----
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+
+# ---- Logs ----
+*.log
+
+# ---- OS and editors ----
+.DS_Store
+.vscode/
+.idea/
+*.swp
+.DS_Store
