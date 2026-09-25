@@ -18,8 +18,6 @@ export function useSpeech({ onFinal, voice } = {}) {
   const [speaking, setSpeaking] = useState(false);
   const [interim, setInterim] = useState("");
   const [error, setError] = useState(null);
-  // A reply (e.g. the greeting) waiting for the first click or key press, which browsers require before speaking
-  const [waitingForGesture, setWaitingForGesture] = useState(false);
   const recRef = useRef(null);
   const turn = useRef(0);
   const onFinalRef = useRef(onFinal);
@@ -52,7 +50,6 @@ export function useSpeech({ onFinal, voice } = {}) {
 
   const stopSpeaking = useCallback(() => {
     turn.current++;
-    setWaitingForGesture(false);
     voice?.current?.stop();
     setSpeaking(false);
   }, [voice]);
@@ -73,7 +70,6 @@ export function useSpeech({ onFinal, voice } = {}) {
 
   const speak = useCallback(async (text) => {
     if (!voice?.current || !text) return;
-    setWaitingForGesture(false);
     const mine = ++turn.current; // a newer reply interrupts this one; only the latest clears "speaking"
     setSpeaking(true);
     try {
@@ -93,11 +89,9 @@ export function useSpeech({ onFinal, voice } = {}) {
 
   const holdForGesture = (text) => {
     const queued = turn.current;
-    setWaitingForGesture(true);
     const later = (e) => {
       window.removeEventListener("pointerdown", later);
       window.removeEventListener("keydown", later);
-      setWaitingForGesture(false);
       // Not when that first key press is push-to-talk (the mic would hear it),
       // and not if speech was stopped meanwhile (e.g. "Read replies aloud" switched off).
       if (!(e.ctrlKey && e.code === "Space") && turn.current === queued) speakRef.current?.(text);
@@ -110,7 +104,7 @@ export function useSpeech({ onFinal, voice } = {}) {
 
   return {
     supported: Boolean(Recognition),
-    listening, speaking, interim, error, waitingForGesture,
+    listening, speaking, interim, error,
     listen, stopListening, speak, stopSpeaking,
   };
 }

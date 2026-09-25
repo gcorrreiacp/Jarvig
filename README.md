@@ -10,6 +10,8 @@ comes back.
 - **Incident dispatcher:** uploads candidate alerts to an FTP server as text files.
 - **MR summarizer:** posts a summary comment on each open GitHub pull request, based on its code.
 - **MR reviewer:** comments on the faulty lines of each open pull request with what to change.
+- **Timesheet (beta):** fills your Excel timesheet from a spoken description of your month.
+- **Private mode (beta):** answers with a model running on your Mac instead of Claude.
 - Each feature is switched on and off on its own, by voice or button ("start the MR reviewer and incident analysis").
 
 ---
@@ -244,13 +246,14 @@ provider. All four features start **off** each time the backend starts.
 
 **Shortcuts:** **Ctrl+Space** talk · **Enter** send · **Esc** stop the reply and the voice.
 
-J.A.R.V.I.G. greets you out loud as soon as the page opens. If a browser refuses to speak before
-you've interacted with the page, a **"🔊 Click to hear J.A.R.V.I.G."** hint appears under the orb and
-any click or key plays the greeting (except Ctrl+Space, so the microphone doesn't hear it).
-
 ### The voice
 
-J.A.R.V.I.G. speaks with a male voice:
+J.A.R.V.I.G. greets you out loud when you open the HUD in a new tab, then reads every reply. Switch
+**Read replies aloud** off at the bottom to stop it, mid-sentence if it's talking. If a browser refuses
+to speak before you've interacted with the page, the greeting is spoken at your first click or key press
+instead (except Ctrl+Space, so the microphone doesn't hear it).
+
+It speaks with a male voice:
 
 - **ElevenLabs**, when `ELEVENLABS_API_KEY` is set in `backend/.env`. The bridge serves it at
   `POST /api/tts`, so the key never reaches the browser, and the orb reacts to the real audio.
@@ -390,7 +393,7 @@ on the next check.
 | `Repository … not found (404)` | Check `GITHUB_REPO` is `owner/name`, and that the token was given access to that repository. |
 | `GitHub refused to post (403)` | The token needs *Pull requests: Read and write* on that repository. |
 | `Operation not permitted` in a terminal | That tab is in a folder that was moved or deleted. `cd` into the project again. |
-| No voice | Click the page once; use Chrome or Edge; check the voice toggle at the bottom. |
+| No voice | Check **Read replies aloud** at the bottom is on; use Chrome or Edge; click the page once in case the browser is holding the voice back. |
 
 ---
 

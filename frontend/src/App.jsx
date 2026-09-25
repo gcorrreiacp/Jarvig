@@ -77,10 +77,6 @@ export default function App() {
             beta={Boolean(bridge.beta)}
             ttsUrl={bridge.meta.tts ? apiUrl("/api/tts") : null}
           />
-          {speech.waitingForGesture && voiceReplies && (
-            // Browsers only allow speech after a click or key press; any click on the page plays it.
-            <button className="voice-hint" type="button">🔊 Click to hear {name}</button>
-          )}
         </div>
         <Transcript
           messages={bridge.messages}

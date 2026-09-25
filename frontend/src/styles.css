@@ -126,13 +126,6 @@ button, input { font: inherit; color: inherit; }
   min-height: 0;
 }
 .hud__center { display: grid; place-items: center; min-height: 0; }
-.voice-hint {
-  margin-top: var(--s3); padding: 6px 14px; cursor: pointer;
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  border: 1px solid var(--line); color: var(--ink); font-size: 13px; letter-spacing: .04em;
-  animation: beta-pulse 2.4s ease-in-out infinite;
-}
-.voice-hint:hover { border-color: var(--accent); }
 
 /* ============ Panels ============ */
 .panel {
