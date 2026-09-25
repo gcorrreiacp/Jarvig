@@ -78,11 +78,15 @@ def _pr_errors() -> tuple[type[Exception], ...]:
 
 def system_prompt() -> str:
     """The configured prompt plus the latest pull request summaries/reviews, so the user can ask about them."""
-    from connectors.github_prs import MODES, PullRequestJob
     context = []
-    for mode in MODES:
-        job = PullRequestJob(mode, github=None, complete=None)  # only reads its saved state
-        context += [r.as_context() for r in job.recent(2)]
+    try:
+        from connectors.github_prs import PullRequestJob
+        for mode in ("summarizer", "reviewer"):
+            job = PullRequestJob(mode, github=None, complete=None)  # only reads its saved state
+            context += [r.as_context() for r in job.recent(2)]
+    except Exception:
+        # Extra context is optional: never let it stop a normal chat reply.
+        log.exception("Couldn't load recent pull request results for the prompt")
     if not context:
         return settings.system_prompt
     return (settings.system_prompt + "\n\nRecent pull request summaries and reviews you produced "
