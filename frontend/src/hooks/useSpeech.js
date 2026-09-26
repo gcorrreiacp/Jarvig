@@ -7,8 +7,6 @@ const speakable = (t) =>
   t.replace(/```[\s\S]*?```/g, " code block omitted. ").replace(/[*_#`>]/g, "").replace(/\[(.*?)\]\(.*?\)/g, "$1")
     .replace(/J\.A\.R\.V\.I\.G\./g, "Jarvig");
 
-// Browsers refuse to speak before the first click or key press on the page.
-const hasUserActivation = () => navigator.userActivation?.hasBeenActive ?? true;
 
 /**
  * Browser speech-to-text, and text-to-speech through the Aura orb (`voice` is its ref),
@@ -72,30 +70,35 @@ export function useSpeech({ onFinal, voice } = {}) {
 
   const speak = useCallback(async (text) => {
     if (!voice?.current || !text) return;
-    if (!hasUserActivation()) {
-      // e.g. the greeting on page load: say it on the first interaction instead of losing it.
-      const queued = turn.current;
-      const later = (e) => {
-        window.removeEventListener("pointerdown", later);
-        window.removeEventListener("keydown", later);
-        // Not when that first key press is push-to-talk (the mic would hear the greeting),
-        // and not if speech was stopped meanwhile (e.g. "Read replies aloud" switched off).
-        if (!(e.ctrlKey && e.code === "Space") && turn.current === queued) speakRef.current?.(text);
-      };
-      window.addEventListener("pointerdown", later, { once: true });
-      window.addEventListener("keydown", later, { once: true });
-      return;
-    }
     const mine = ++turn.current; // a newer reply interrupts this one; only the latest clears "speaking"
     setSpeaking(true);
     try {
       await voice.current.say(speakable(text));
     } catch (e) {
-      setError(`Voice: ${e.message}`);
+      // Try first: Chrome often allows speech on load for sites you use a lot. Only when the browser
+      // refuses (no click or key press yet) hold it and say it on the first interaction.
+      if (e?.name === "NotAllowedError") {
+        if (turn.current === mine) holdForGesture(text);
+      } else {
+        setError(`Voice: ${e.message}`);
+      }
     } finally {
       if (turn.current === mine) setSpeaking(false);
     }
   }, [voice]);
+
+  const holdForGesture = (text) => {
+    const queued = turn.current;
+    const later = (e) => {
+      window.removeEventListener("pointerdown", later);
+      window.removeEventListener("keydown", later);
+      // Not when that first key press is push-to-talk (the mic would hear it),
+      // and not if speech was stopped meanwhile (e.g. "Read replies aloud" switched off).
+      if (!(e.ctrlKey && e.code === "Space") && turn.current === queued) speakRef.current?.(text);
+    };
+    window.addEventListener("pointerdown", later, { once: true });
+    window.addEventListener("keydown", later, { once: true });
+  };
   const speakRef = useRef(speak);
   speakRef.current = speak;
 

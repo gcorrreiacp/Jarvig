@@ -32,6 +32,7 @@ export function apiUrl(path) {
 export function useBridge({ onReply } = {}) {
   const [status, setStatus] = useState("connecting"); // connecting | online | offline
   const [meta, setMeta] = useState({ assistant: "J.A.R.V.I.G.", agent: null, tts: false });
+  const [beta, setBeta] = useState(null); // title of the beta skill in progress, e.g. "Timesheet"
   const [services, setServices] = useState({
     analysis: { enabled: false, totals: {} },
     dispatcher: { enabled: false, totals: {} },
@@ -78,6 +79,13 @@ export function useBridge({ onReply } = {}) {
             setMetrics((m) => ({ ...m, turns: msg.turns ?? 0 }));
             document.title = msg.assistant;
             break;
+          case "mode": {
+            // Beta colours while a beta skill runs or private mode is on; the tag says which.
+            const privateMode = msg.brain?.mode === "private" ? `Private · ${msg.brain.model}` : null;
+            setBeta(msg.beta ? [msg.skill, privateMode].filter(Boolean).join(" · ") || "Beta" : null);
+            if (msg.agent) setMeta((m) => ({ ...m, agent: msg.agent }));
+            break;
+          }
           case "service":
             setServices((all) => ({ ...all, [msg.service]: msg }));
             break;
@@ -93,7 +101,7 @@ export function useBridge({ onReply } = {}) {
             break;
           case "done":
             setBusy(false);
-            patchLast(msg.id, () => ({ text: msg.text, streaming: false }));
+            patchLast(msg.id, () => ({ text: msg.text, streaming: false, table: msg.table }));
             // Replies the bridge writes itself ("local") have no agent timings; keep the last ones.
             setMetrics((m) => (msg.local
               ? { ...m, turns: msg.turns }
@@ -153,5 +161,5 @@ export function useBridge({ onReply } = {}) {
   const reset = useCallback(() => raw({ type: "reset" }), []);
   const toggleService = useCallback((service, enabled) => raw({ type: "toggle", service, enabled }), []);
 
-  return { status, meta, messages, busy, metrics, services, send, cancel, reset, toggleService, session };
+  return { status, meta, messages, busy, metrics, services, beta, send, cancel, reset, toggleService, session };
 }

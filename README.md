@@ -10,9 +10,8 @@ comes back.
 - **Incident dispatcher:** uploads candidate alerts to an FTP server as text files.
 - **MR summarizer:** posts a summary comment on each open GitHub pull request, based on its code.
 - **MR reviewer:** comments on the faulty lines of each open pull request with what to change.
-- Each feature is switched on and off on its own, by voice or button ("start the MR reviewer and incident analysis").
-- **MR summarizer:** posts a summary comment on each open GitHub pull request, based on its code.
-- **MR reviewer:** comments on the faulty lines of each open pull request with what to change.
+- **Timesheet (beta):** fills your Excel timesheet from a spoken description of your month.
+- **Private mode (beta):** answers with a model running on your Mac instead of Claude.
 - Each feature is switched on and off on its own, by voice or button ("start the MR reviewer and incident analysis").
 
 ---
@@ -103,8 +102,8 @@ npm run dev
 
 Open **http://localhost:5173** in Chrome or Edge and allow the microphone when asked.
 
-J.A.R.V.I.G. greets you and asks whether to enable incident analysis. Answer **"no"** for now (it
-needs Gmail, set up below) and ask it anything. Type and press **Enter**, or press **Ctrl+Space** and speak.
+J.A.R.V.I.G. greets you and asks what you'd like to do. Type and press **Enter**, or press
+**Ctrl+Space** and speak.
 
 Next time, you only need step 5. Stop both with **Ctrl+C**.
 
@@ -152,7 +151,7 @@ python -m connectors.gmail_watcher once
 Each alert is listed with what would happen to it (`CANDIDATE`, `DISCARDED`, `ANALYZED`) and why. Adjust
 the rules until it's right, then set `"dry_run": false`.
 
-Now answer **"yes"** when J.A.R.V.I.G. greets you, or say "enable incident analysis".
+Now say **"enable incident analysis"** (or use its button in the Systems panel).
 
 ## Connecting FTP (for the incident dispatcher)
 
@@ -209,35 +208,6 @@ python -m connectors.github_prs review <number>
 Restart the backend, then say "start the MR summarizer" and/or "start the MR reviewer". **When switched
 on, each one handles every open pull request that doesn't have its comment yet**, up to 3 per check.
 
-## Connecting GitHub (for the MR summarizer and MR reviewer)
-
-**1. Create a token** at https://github.com/settings/personal-access-tokens → **Generate new token**
-(fine-grained):
-
-- **Repository access:** *Only select repositories* → the repository to watch.
-- **Permissions → Repository:** *Pull requests: Read and write* and *Contents: Read-only*.
-
-**2. Add it to `backend/.env`:**
-
-```ini
-GITHUB_TOKEN=github_pat_...
-GITHUB_REPO=owner/repository
-```
-
-Summaries and reviews are posted on the pull requests, **visible to everyone who can see them**, and
-appear under the account the token belongs to.
-
-**3. Try it on one pull request first** (prints only; posts nothing):
-
-```bash
-python -m connectors.github_prs list
-python -m connectors.github_prs summarize <number>
-python -m connectors.github_prs review <number>
-```
-
-Restart the backend, then say "start the MR summarizer" and/or "start the MR reviewer". **When switched
-on, each one handles every open pull request that doesn't have its comment yet**, up to 3 per check.
-
 ---
 
 ## Using J.A.R.V.I.G.
@@ -246,7 +216,6 @@ on, each one handles every open pull request that doesn't have its comment yet**
 
 | Say | What happens |
 |---|---|
-| "yes" / "no" (to the greeting) | Switches incident analysis on, or leaves it off |
 | "enable incident analysis" / "turn off incident analysis" | Starts or stops sorting your alert emails |
 | "enable incident dispatcher" / "turn off incident dispatcher" | Starts or stops uploading candidates to FTP |
 | "start incident dispatcher and incident analysis", "stop both" | Several at once |
@@ -256,15 +225,12 @@ on, each one handles every open pull request that doesn't have its comment yet**
 | "stop everything" | All four features |
 | "is incident analysis running?", "status of both" | State and what's been handled so far ("both" = the two incident features) |
 | "what did the last pull request change?" | Answered by the AI, which is given the latest summaries and reviews |
-| "start the MR summarizer" / "turn off the MR reviewer" | Starts or stops one pull request feature |
-| "turn on the MR features", "start the summarizer but stop the reviewer" | Both pull request features, or one each |
-| "stop everything" | All four features |
-| "is incident analysis running?", "status of both" | State and what's been handled so far ("both" = the two incident features) |
-| "what did the last pull request change?" | Answered by the AI, which is given the latest summaries and reviews |
+| "which features are in beta?" | The beta features and what each needs before leaving beta |
+| "switch to private mode" / "standard mode" | Answer with the local model / back to Claude |
+| "which model are you using?" | Private or standard mode, and which model |
 | anything else | Answered by the AI |
 
 These commands are handled by J.A.R.V.I.G. itself, not the AI, so they're instant and work with every
-provider. All four features start **off** each time the backend starts.
 provider. All four features start **off** each time the backend starts.
 
 ### The screen
@@ -273,24 +239,91 @@ provider. All four features start **off** each time the backend starts.
   (idle, listening, thinking, speaking, offline), moves with the voice while it speaks and with your
   microphone while you talk.
 - **Right, Conversation:** everything said so far.
-- **Left, Systems:** connection, AI provider and speed, both services with their counts, and on/off
-  buttons for each. (Hidden on windows narrower than 1100 px; voice commands still work.)
+- **Left, Systems:** *Link* (connection, AI provider and speed) and *Features*, each feature with its
+  state, an on/off switch and its counts while on. The panel scrolls if it's longer than the window.
+  (Hidden on windows narrower than 1100 px; voice commands still work.)
 - **Bottom:** the text box, microphone button and voice on/off.
 
 **Shortcuts:** **Ctrl+Space** talk · **Enter** send · **Esc** stop the reply and the voice.
 
-Browsers only allow speech after your first click or key press, so the greeting is read aloud on your
-first click.
-
 ### The voice
 
-J.A.R.V.I.G. speaks with a male voice:
+J.A.R.V.I.G. greets you out loud when you open the HUD in a new tab, then reads every reply. Switch
+**Read replies aloud** off at the bottom to stop it, mid-sentence if it's talking. If a browser refuses
+to speak before you've interacted with the page, the greeting is spoken at your first click or key press
+instead (except Ctrl+Space, so the microphone doesn't hear it).
+
+It speaks with a male voice:
 
 - **ElevenLabs**, when `ELEVENLABS_API_KEY` is set in `backend/.env`. The bridge serves it at
   `POST /api/tts`, so the key never reaches the browser, and the orb reacts to the real audio.
   The default is "George", a British male voice; change it with `ELEVENLABS_VOICE_ID`.
 - **The browser's built-in voice** otherwise, a male English voice such as Daniel (the list is
   `MALE_VOICE` in `frontend/src/components/Core.jsx`). The orb's movement is simulated from word timing.
+
+### Beta features
+
+Whether a feature is in beta is decided in **one place**, `backend/features.json`:
+
+```json
+"timesheet": {
+  "title": "Timesheet", "kind": "skill", "status": "beta", "since": "2026-09-26",
+  "ready_when": "It has filled two real months of the timesheet correctly without manual fixes."
+}
+```
+
+- A **beta skill** turns the HUD **violet** while it runs, shows a **BETA · <skill>** tag, and starts
+  every reply with *"You've requested a BETA Feature."*
+- A **beta service** gets a **BETA** tag in the Systems panel.
+- **See what's in beta:** ask *"Jarvig, which features are in beta?"*, run `python -m bridge.features`
+  (from `backend/`), or open `/api/features`.
+- **Take a feature out of beta:** once its `ready_when` is true, change its `"status"` to `"stable"`.
+  That's all: the violet look, the prefix and the tags go away for it, with no code change or restart.
+- **New features** start as `"beta"` with a `ready_when`. A feature missing from the file, or a typo in
+  it, counts as beta, so nothing is shown as finished by mistake.
+
+**Skills** have no buttons: J.A.R.V.I.G. recognises the request, then handles it as a conversation
+(questions, a preview, your "yes") until it's done. Say **"cancel"** at any point to stop it without
+changing anything.
+
+### Private mode (beta)
+
+Say **"switch to private mode"** and J.A.R.V.I.G. answers with a model running on this Mac (Ollama's
+`llama3.1` by default) instead of Claude, so nothing leaves the machine. **Everything** uses it while it's
+on: chat, skills, and the MR summarizer and reviewer. Say **"standard mode"** (or "disable private mode",
+"back to Claude") to return. "Which model are you using?" tells you where you are.
+
+- It's a beta feature: the HUD stays **violet** with a **BETA · Private · <model>** tag the whole time,
+  and the beta line is said once, when switching.
+- J.A.R.V.I.G. starts Ollama if it isn't running, and checks the model really answers before switching;
+  if it can't, it says why and stays on Claude.
+- **Automatic fallback:** if Claude fails (usage limit, no internet, signed out), J.A.R.V.I.G. switches
+  to private mode by itself, says so once, and answers locally.
+- It always starts in standard mode. Set the model in `LOCAL_BASE_URL` / `LOCAL_MODEL` (for LM Studio:
+  `http://localhost:1234/v1` and its model name). Download the default once with `ollama pull llama3.1`.
+
+### Timesheet (beta skill)
+
+Describe your month and J.A.R.V.I.G. fills the Excel timesheet set in `TIMESHEET_PATH`:
+
+> "Jarvig, fill my timesheet: this month I worked every day from 8 to 17, on the 14th I had training,
+> I was sick on the 17th and 18th and on vacation on the 21st."
+
+1. It shows a **day-by-day table** of exactly what will go in each row (morning, afternoon, hours, type,
+   location, and whether a day is new or replaces something), and asks about anything unclear, such as
+   a date that falls on a weekend.
+2. **Confirm it, or say what to change** ("the training was only in the morning"); the table is rebuilt.
+3. It then asks **whether to update the file**, and only saves after your yes.
+
+Rules it follows, taken from how the sheet is filled: normal days are `Trabalho - Istarbeit` with the
+lunch break from `TIMESHEET_LUNCH` (default 12:00–13:00); training has hours; vacation and sick leave
+have no hours or location; weekends stay empty unless you name them; public holidays (the rows the
+template colours red) become `Feriado - Feiertag`, and a holiday you name on another day is coloured red
+the same way; rows coloured green are asked about. The location defaults to `TIMESHEET_LOCATION`.
+
+Saving only rewrites the changed cells inside the file, so the dropdowns, charts, colours and formulas
+stay intact. A backup is saved next to the file first, and Excel recalculates the totals when you open
+it. Close the file in Excel before saving; J.A.R.V.I.G. tells you if it's open.
 
 ### How an alert moves through Gmail
 
@@ -339,30 +372,6 @@ on the next check.
   given to the AI so you can ask about them.
 - Reviews come from an AI and can be wrong: treat them as suggestions.
 
-### How pull requests are summarized and reviewed
-
-Every `PR_POLL_SECONDS` (default 2 minutes), each feature that is on looks at **every open pull request**
-of `GITHUB_REPO` and checks on GitHub whether it already did its part. What it posts carries a hidden
-marker with the commit it covers, and only markers written by the token's account count. So a pull
-request opened while J.A.R.V.I.G. was off is still picked up, and a post that failed is simply retried
-on the next check.
-
-| | MR summarizer | MR reviewer |
-|---|---|---|
-| **Posts** | One general comment on the pull request with a summary of what the code changes | A GitHub review with a comment on each faulty line saying what to change, as a one-click *suggestion* when the fix is exact code |
-| **No problems?** | n/a | Still posts a review saying *no problems found*, which marks it as reviewed |
-| **New commits** | Edits its summary comment to match the latest code | Reviews only the changes since the commit it last reviewed |
-
-- The AI only sees the **code diff**; the description and commit messages are deliberately not used.
-  Lock files and binaries are left out; diffs longer than `PR_MAX_DIFF_CHARS` are cut off and the
-  result says it is partial.
-- Findings on lines GitHub doesn't allow comments on (outside the diff) are listed in the review's
-  overall text instead of being dropped.
-- Reviews are comment-only: J.A.R.V.I.G. never approves or blocks a merge.
-- Each result is also said aloud in short and shown in full in the conversation, and the latest ones are
-  given to the AI so you can ask about them.
-- Reviews come from an AI and can be wrong: treat them as suggestions.
-
 ---
 
 ## Troubleshooting
@@ -383,11 +392,8 @@ on the next check.
 | `GITHUB_TOKEN is empty` / `GitHub rejected the token (401)` | Create a token ([Connecting GitHub](#connecting-github-for-the-mr-summarizer-and-mr-reviewer)) and put it in `backend/.env`; restart. |
 | `Repository … not found (404)` | Check `GITHUB_REPO` is `owner/name`, and that the token was given access to that repository. |
 | `GitHub refused to post (403)` | The token needs *Pull requests: Read and write* on that repository. |
-| `GITHUB_TOKEN is empty` / `GitHub rejected the token (401)` | Create a token ([Connecting GitHub](#connecting-github-for-the-mr-summarizer-and-mr-reviewer)) and put it in `backend/.env`; restart. |
-| `Repository … not found (404)` | Check `GITHUB_REPO` is `owner/name`, and that the token was given access to that repository. |
-| `GitHub refused to post (403)` | The token needs *Pull requests: Read and write* on that repository. |
 | `Operation not permitted` in a terminal | That tab is in a folder that was moved or deleted. `cd` into the project again. |
-| No voice | Click the page once; use Chrome or Edge; check the voice toggle at the bottom. |
+| No voice | Check **Read replies aloud** at the bottom is on; use Chrome or Edge; click the page once in case the browser is holding the voice back. |
 
 ---
 
@@ -397,7 +403,7 @@ on the next check.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `ASSISTANT_NAME` | `J.A.R.V.I.G.` | Name shown in the HUD and used in the greeting |
+| `ASSISTANT_NAME` | `J.A.R.V.I.G.` | Name shown in the HUD and in some greetings |
 | `SYSTEM_PROMPT` | | Personality and instructions for the AI |
 | `AGENT_PROVIDER` | `echo` | `echo`, `claude_code`, `anthropic`, `openai`, `webhook` or `custom` |
 | `CLAUDE_CODE_CLI`, `CLAUDE_CODE_MODEL` | `claude`, account default | CLI path and optional model (`sonnet`, `opus`) |
@@ -410,6 +416,9 @@ on the next check.
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL` | none, "George", `eleven_multilingual_v2` | Optional ElevenLabs voice; empty key uses the browser voice |
 | `GITHUB_TOKEN`, `GITHUB_REPO` | | Token and `owner/name` of the repository for the MR features |
 | `PR_POLL_SECONDS`, `PR_MAX_DIFF_CHARS` | `120`, `60000` | How often to check the pull requests; diff size limit |
+| `LOCAL_BASE_URL`, `LOCAL_MODEL`, `LOCAL_API_KEY` | Ollama, `llama3.1` | The local model for private mode (beta) |
+| `TIMESHEET_PATH` | | The Excel timesheet the Timesheet skill (beta) fills in; `~/` allowed |
+| `TIMESHEET_LUNCH`, `TIMESHEET_LOCATION` | `12:00-13:00`, `Portugal` | Lunch break that splits the day; default location |
 | `CORS_ORIGINS`, `HISTORY_LIMIT` | | Allowed frontend origins; messages remembered per conversation |
 
 `.env` is read from `backend/` (or the project root) wherever you start the backend from.
@@ -425,7 +434,6 @@ settings in `.env`: putting `GMAIL_…` lines in `.env` has no effect.
 | `token.json` | Your Gmail sign-in | `python -m connectors.gmail auth --modify` |
 | `alert_filters.json` | Incident analysis rules | You, copied from `alert_filters.example.json` |
 | `data/candidates.jsonl` | Queue of candidate emails | Incident analysis |
-| `data/pr_summarizer_state.json`, `data/pr_reviewer_state.json` | Latest results, for follow-up questions (what's done is read from GitHub) | MR summarizer / reviewer |
 | `data/pr_summarizer_state.json`, `data/pr_reviewer_state.json` | Latest results, for follow-up questions (what's done is read from GitHub) | MR summarizer / reviewer |
 
 To keep one elsewhere, export an environment variable in the terminal **before** starting the backend,
@@ -465,7 +473,7 @@ for example `export GMAIL_TOKEN_FILE=/secure/token.json`. The variables are `GMA
 | `python -m connectors.gmail_watcher once [--dry-run]` / `watch` / `test <id>` | Incident analysis without the HUD |
 | `python -m connectors.incident_dispatcher preview <id>` / `once` / `watch` | Incident dispatcher without the HUD |
 | `python -m connectors.github_prs list` / `summarize <n>` / `review <n>` | Pull request features without the HUD (prints only) |
-| `python -m connectors.github_prs list` / `summarize <n>` / `review <n>` | Pull request features without the HUD (prints only) |
+| `python -m bridge.features` | Every feature and whether it's in beta |
 
 ### Backend API
 
@@ -476,6 +484,8 @@ for example `export GMAIL_TOKEN_FILE=/secure/token.json`. The variables are `GMA
 | GET / POST | `/api/incidents` | Incident analysis status / `{"enabled": true}` |
 | GET / POST | `/api/dispatcher` | Incident dispatcher status / `{"enabled": true}` |
 | POST | `/api/tts` | `{"text"}` → `audio/mpeg` via ElevenLabs (404 when no key is set) |
+| GET | `/api/features` | Every feature and whether it's in beta |
+| POST | `/api/brain` | `{"mode": "private" \| "standard"}`, like saying it |
 | GET | `/api/agent` | Assistant name, provider and model |
 | POST | `/api/sessions/{id}/reset` | Clear a conversation's memory |
 | GET | `/api/health` | Liveness |
@@ -497,7 +507,6 @@ for example `export GMAIL_TOKEN_FILE=/secure/token.json`. The variables are `GMA
 | `backend/bridge` | Web server (`main.py`), built-in commands (`commands.py`), background services (`services.py`), settings (`config.py`) |
 | `backend/agent` | AI providers (`adapters/`) and a template for your own (`examples/my_agent.py`) |
 | `backend/connectors` | Gmail (`gmail.py`), incident analysis (`gmail_watcher.py`), incident dispatcher (`incident_dispatcher.py`), MR summarizer and reviewer (`github_prs.py`) |
-| `backend/connectors` | Gmail (`gmail.py`), incident analysis (`gmail_watcher.py`), incident dispatcher (`incident_dispatcher.py`), MR summarizer and reviewer (`github_prs.py`) |
 
 **Your own agent:** subclass `agent.base.Agent`, implement `async def stream(self, messages, system)`
 yielding text, and set `AGENT_PROVIDER=custom`, `CUSTOM_AGENT=module:Class`.
@@ -514,9 +523,6 @@ in-memory (`bridge/sessions.py`).
 ### Security
 
 - Never commit `backend/.env`, `credentials.json`, `token.json` or `alert_filters.json`; `.gitignore`
-  already excludes them. Anyone with `token.json` can read and label your email, and anyone with
-  `GITHUB_TOKEN` can act on the repository within the token's permissions.
-- The MR features send pull request diffs to the AI provider you configured.
   already excludes them. Anyone with `token.json` can read and label your email, and anyone with
   `GITHUB_TOKEN` can act on the repository within the token's permissions.
 - The MR features send pull request diffs to the AI provider you configured.

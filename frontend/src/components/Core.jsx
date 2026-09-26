@@ -17,6 +17,14 @@ const ORB_COLORS = {
   thinking: { colorA: "#a34a00", colorB: "#ffb547" },
   offline: { colorA: "#16252c", colorB: "#5d7b88" },
 };
+// While a beta skill runs (see .hud--beta): violet, except "working" and "no link" keep their meaning
+const BETA_ORB_COLORS = {
+  ...ORB_COLORS,
+  idle: { colorA: "#5a1fd1", colorB: "#c79bff" },
+  speaking: { colorA: "#5a1fd1", colorB: "#c79bff" },
+  listening: { colorA: "#7b3cff", colorB: "#e2ccff" },
+  offline: { colorA: "#1d1629", colorB: "#6c5d88" },
+};
 
 // Built-in voices to try when there is no server TTS: male English voices, best first
 const MALE_VOICE = /Daniel|Google UK English Male|Arthur|Oliver|Microsoft Ryan|Microsoft Guy|Aaron|Tom|Alex|Fred|\bMale/i;
@@ -27,7 +35,7 @@ const reducedMotion = typeof matchMedia !== "undefined" && matchMedia("(prefers-
  * The holographic core: the Aura orb, which moves with the voice, inside rings that react to `state`.
  * The ref is the Aura handle (say, stop, useMic, releaseMic).
  */
-const Core = forwardRef(function Core({ state, name, ttsUrl }, auraRef) {
+const Core = forwardRef(function Core({ state, name, ttsUrl, beta = false }, auraRef) {
   const ticks = useMemo(
     () =>
       Array.from({ length: 120 }, (_, i) => {
@@ -47,12 +55,12 @@ const Core = forwardRef(function Core({ state, name, ttsUrl }, auraRef) {
           className="core__orb"
           style={{ width: undefined, height: undefined }}
           ttsUrl={ttsUrl}
-          background="#020a10"
+          background={beta ? "#0b0614" : "#020a10"}
           browserVoice={MALE_VOICE}
           pitch={0.9}
           rate={1}
           intensity={reducedMotion ? 0.3 : 1}
-          {...ORB_COLORS[state]}
+          {...(beta ? BETA_ORB_COLORS : ORB_COLORS)[state]}
         />
         <svg viewBox="-210 -210 420 420">
           <defs>

@@ -419,7 +419,7 @@ class PullRequestJob:
         mode: str,
         github: GitHub | None,
         complete: Callable[[str, str], str] | None,
-        agent_name: str = "AI",
+        agent_name: str | Callable[[], str] = "AI",
         max_diff_chars: int = 60000,
         poll_seconds: int = 120,
         state_file: Path | None = None,
@@ -429,11 +429,15 @@ class PullRequestJob:
         self.mode = mode
         self.github = github
         self.complete = complete          # (prompt, system) -> reply text
-        self.agent_name = agent_name
+        self._agent_name = agent_name     # a name, or a function returning it (the AI can change mid-run)
         self.max_diff_chars = max_diff_chars
         self.poll_seconds = poll_seconds
         # Only the latest results, for follow-up questions. What has been done is read from GitHub.
         self.state_file = state_file or _backend_path(f"data/pr_{mode}_state.json")
+
+    @property
+    def agent_name(self) -> str:
+        return self._agent_name() if callable(self._agent_name) else self._agent_name
 
     def recent(self, limit: int = 3) -> list[Result]:
         try:
@@ -556,7 +560,8 @@ class PullRequestJob:
         return counts
 
 
-def build_from_settings(mode: str, settings, complete: Callable[[str, str], str], agent_name: str) -> PullRequestJob:
+def build_from_settings(mode: str, settings, complete: Callable[[str, str], str],
+                        agent_name: str | Callable[[], str]) -> PullRequestJob:
     github = GitHub(settings.github_token, settings.github_repo)
     github.check()   # a bad token or repo is reported when the feature is switched on
     github.login()

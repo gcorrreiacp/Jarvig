@@ -237,15 +237,22 @@ export function createAura(container, options = {}) {
 
   // The browser voice can't be routed into Web Audio, so its movement is simulated from word timing.
   function sayWithBrowser(text) {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
       const u = new SpeechSynthesisUtterance(text);
       const v = pickVoice(speechSynthesis.getVoices(), opt.browserVoice);
       if (v) u.voice = v;
       u.pitch = opt.pitch; u.rate = opt.rate;
       u.onstart = () => { browserSpeaking = true; };
       u.onboundary = () => { simulated = 0.75; };
-      u.onend = u.onerror = () => { browserSpeaking = false; finishCurrent = null; resolve(); };
+      u.onend = () => { browserSpeaking = false; finishCurrent = null; resolve(); };
+      u.onerror = (e) => {
+        browserSpeaking = false; finishCurrent = null;
+        // "not-allowed": no click or key press yet (autoplay rules); the caller waits for one.
+        if (e.error === 'not-allowed') reject(new DOMException('Speech needs a click first', 'NotAllowedError'));
+        else resolve();
+      };
       finishCurrent = resolve;
+      speechSynthesis.resume();   // clears Chrome's occasional stuck "paused" state
       speechSynthesis.speak(u);
     });
   }
@@ -255,7 +262,10 @@ export function createAura(container, options = {}) {
     stop();
     const mine = gen;
     if (!opt.ttsUrl && !opt.elevenLabsKey) return sayWithBrowser(text);
-    ensureCtx(); await ctx.resume();
+    ensureCtx();
+    // Without a click yet, the audio can't start: say so instead of waiting forever.
+    await Promise.race([ctx.resume(), new Promise(r => setTimeout(r, 400))]);
+    if (ctx.state !== 'running') throw new DOMException('Audio needs a click first', 'NotAllowedError');
     const blob = await fetchSpeech(text);
     if (mine !== gen) return;   // stopped or replaced while the audio was downloading
     return playBlob(blob);
